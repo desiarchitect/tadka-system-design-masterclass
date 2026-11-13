@@ -1,0 +1,8 @@
+---
+description: Tadka lab rules. Read AGENTS.md and the lesson contract before building, porting or running a lab.
+alwaysApply: true
+---
+
+Follow `AGENTS.md` at the repository root. It is the single source of truth for every AI assistant in this repo.
+
+Before building, porting or running anything, read `docs/lessons/lesson-NN-contract.md` for the current `lesson-NN-*` branch. Ports go in `ports/<language>-<framework>/` and reuse the shared database, load tests and scripts unchanged. Never write expected numbers as measured results.

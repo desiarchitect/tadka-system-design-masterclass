@@ -5,6 +5,13 @@ using Tadka.OrderApi.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// HOLD_MS is the language-neutral switch from the lesson contract, shared by every port.
+// Demo__HoldMs (the .NET configuration form) still works too.
+if (Environment.GetEnvironmentVariable("HOLD_MS") is { Length: > 0 } holdOverride)
+{
+    builder.Configuration["Demo:HoldMs"] = holdOverride;
+}
+
 // One-line console logs, so each request is one readable line in the log pane.
 builder.Logging.ClearProviders();
 builder.Logging.AddSimpleConsole(o =>

@@ -17,6 +17,8 @@ This branch proves one thing: an API can become slow because requests wait for a
 | `docker-compose.yml` | PostgreSQL 16 on port 5433. |
 | `load-tests/order-spike.js` | k6 with a fixed arrival rate. |
 | `scripts/` | Database activity monitor and reset. |
+| `docs/lessons/` | The language-neutral lesson contract. |
+| `ports/` | Learner ports in other languages (empty at first). |
 
 ### What to inspect first
 
@@ -77,9 +79,9 @@ k6 run -e RATE=100 -e DURATION=30s load-tests/order-spike.js
 
 ```bash
 # bash
-Demo__HoldMs=20 dotnet run -c Release --launch-profile demo
+HOLD_MS=20 dotnet run -c Release --launch-profile demo
 # PowerShell
-$env:Demo__HoldMs=20; dotnet run -c Release --launch-profile demo
+$env:HOLD_MS=20; dotnet run -c Release --launch-profile demo
 ```
 
 Then:
@@ -88,7 +90,7 @@ Then:
 k6 run -e RATE=100 -e DURATION=15s load-tests/order-spike.js
 ```
 
-Remove the variable afterwards (`Remove-Item Env:Demo__HoldMs` in PowerShell) so the next start uses 200 ms again.
+Remove the variable afterwards (`Remove-Item Env:HOLD_MS` in PowerShell) so the next start uses 200 ms again.
 
 ## What to look at
 
@@ -115,6 +117,31 @@ Between runs, empty the table:
 ```
 
 To throw everything away: `docker compose down`. There is no volume, so the next `up` starts clean.
+
+## Build it in your own language, with AI
+
+The reference is .NET, but the experiment is not. You can rebuild this lab in Java, Node.js, Python, Go or anything else and run the same k6 script against it.
+
+The language-neutral spec is [`docs/lessons/lesson-01-contract.md`](docs/lessons/lesson-01-contract.md): endpoint, SQL, pool settings, where each timer starts and stops, and the log format. Ports go in `ports/<language>-<framework>/` and reuse the database, load tests and scripts from the root.
+
+The repo is set up for AI coding assistants:
+
+| Tool | What it reads |
+|---|---|
+| Any assistant | `AGENTS.md`, the shared rules |
+| Claude Code | `CLAUDE.md`, plus the `port-lab` and `run-experiment` skills, the `lab-reviewer` agent and a session-start hook in `.claude/` |
+| GitHub Copilot | `.github/copilot-instructions.md` |
+| Cursor | `.cursor/rules/tadka.mdc` |
+
+With Claude Code, for example:
+
+```text
+Port this lab to Java with Spring Boot and HikariCP.
+Review my port with the lab-reviewer agent.
+Run the experiment against ports/java-spring.
+```
+
+Two things to keep in mind. First, the assistant can be wrong about how your database driver's pool behaves, especially the acquire timeout, so check its claims against the driver's documentation. Second, the point is the experiment. If your port's numbers differ from the reference, find out why. That investigation is the lesson.
 
 ## Not on this branch, on purpose
 
