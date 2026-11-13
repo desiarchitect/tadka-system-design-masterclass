@@ -1,1 +1,121 @@
-# tadka-system-design-masterclass
+# Tadka: System Design Masterclass
+
+The practical case study for the Desi Architect System Design Masterclass. Each lesson that needs a lab has its own branch. You check out the branch, inspect what is there, push traffic or failures at it, diagnose what you see, then compare it with the next branch.
+
+**Inspect → Break → Diagnose → Evolve**
+
+## Branch: `lesson-01-baseline`
+
+Lesson 01, *Inspect & Break: The Tadka Order API Under a Traffic Spike*.
+
+This branch proves one thing: an API can become slow because requests wait for a database connection, even when the database command itself has not become slower. It is a small experiment, not a food-delivery app.
+
+| Part | What it is |
+|---|---|
+| `src/Tadka.OrderApi` | One ASP.NET Core endpoint, `POST /orders`. One instance. Connection pool size 10, set explicitly. |
+| `database/init.sql` | One `orders` table. |
+| `docker-compose.yml` | PostgreSQL 16 on port 5433. |
+| `load-tests/order-spike.js` | k6 with a fixed arrival rate. |
+| `scripts/` | Database activity monitor and reset. |
+
+### What to inspect first
+
+1. **Pool settings:** `src/Tadka.OrderApi/appsettings.json`, the connection string. `Maximum Pool Size=10` is the most connections this API instance will use at once. `Timeout=15` is how many seconds a request waits for a free pooled connection before it fails. This is the application-side pool. It is a different setting from PostgreSQL's own `max_connections`.
+2. **The artificial delay:** `src/Tadka.OrderApi/Data/OrderStore.cs`. The insert runs after `pg_sleep`, so each order holds its connection for `Demo:HoldMs` milliseconds (200 in `appsettings.Demo.json`). `pg_sleep` keeps the connection busy without using database CPU. **It is not a simulation of a slow production query.** It exists so the pool's behaviour is easy to see.
+3. **The two timers:** also in `OrderStore.cs`.
+   - `wait_ms`: from asking the pool for a connection until the pool hands one over.
+   - `db_ms`: from just before the database command runs until it completes. The `pg_sleep` delay is inside this number.
+
+   Each request writes one log line with `request_id`, `status`, `wait_ms`, `db_ms`, `total_ms` and, on failure, the exception.
+
+### The theory you will test
+
+```
+Pool size = 10 connections
+Hold time = 200 ms
+1000 / 200 = 5 operations per second per connection
+10 × 5     = 50 operations per second (theoretical, pool-bound)
+```
+
+This is a theoretical limit for the pool under those assumptions. It is not the application's capacity.
+
+## Prerequisites
+
+- Docker
+- .NET 10 SDK
+- k6
+
+## Run the experiment
+
+Use three terminal panes.
+
+**Pane 3, database (start first):**
+
+```bash
+docker compose up -d --wait
+./scripts/pg-activity.sh          # or: ./scripts/pg-activity.ps1
+```
+
+**Pane 2, API (200 ms hold):**
+
+```bash
+cd src/Tadka.OrderApi
+dotnet run -c Release --launch-profile demo
+```
+
+The first log line prints the settings in use: `max_pool_size`, `pool_timeout_s`, `hold_ms`. Check them before every run.
+
+**Pane 1, load:**
+
+```bash
+k6 run -e RATE=20  -e DURATION=10s load-tests/order-spike.js
+k6 run -e RATE=40  -e DURATION=10s load-tests/order-spike.js
+k6 run -e RATE=100 -e DURATION=30s load-tests/order-spike.js
+```
+
+**Run 4, the 20 ms hold.** Stop the API (Ctrl+C) and start it again with a shorter hold:
+
+```bash
+# bash
+Demo__HoldMs=20 dotnet run -c Release --launch-profile demo
+# PowerShell
+$env:Demo__HoldMs=20; dotnet run -c Release --launch-profile demo
+```
+
+Then:
+
+```bash
+k6 run -e RATE=100 -e DURATION=15s load-tests/order-spike.js
+```
+
+Remove the variable afterwards (`Remove-Item Env:Demo__HoldMs` in PowerShell) so the next start uses 200 ms again.
+
+## What to look at
+
+| Where | Read this |
+|---|---|
+| k6 summary | `http_reqs`, `http_req_failed`, `http_req_duration`, `checks_succeeded`, and `dropped_iterations` if it appears |
+| API log | `wait_ms` and `db_ms` of the same request, side by side. Failures show `status=503` and the pool exception. |
+| Database pane | `active` and `idle` client sessions on PostgreSQL |
+
+Things that are easy to misread:
+
+- **k6 `http_reqs .../s` is not the arrival rate.** It is total requests divided by the whole test time, including the time spent waiting for slow requests to finish after arrivals stop. Compare `http_reqs` (the count) with `RATE × DURATION` instead.
+- **The database pane cannot show the pool's queue.** `pg_stat_activity` lists sessions on the PostgreSQL server. Requests waiting inside the API for a pooled connection are not sessions yet, so they never appear there. That is why `wait_ms` is measured in the application.
+- **The query filters to `backend_type = 'client backend'`.** Without it, PostgreSQL's autovacuum worker shows up as an extra active session during heavy inserts, and the count can read 11 with a pool of 10.
+- **The first request after a start is slower.** The pool starts empty, so the first requests include opening a real connection to PostgreSQL inside `wait_ms`.
+- **Results are from your machine.** They are not a benchmark.
+
+## Reset
+
+Between runs, empty the table:
+
+```bash
+./scripts/reset.sh                # or: ./scripts/reset.ps1
+```
+
+To throw everything away: `docker compose down`. There is no volume, so the next `up` starts clean.
+
+## Not on this branch, on purpose
+
+Redis, Kafka, microservices, Kubernetes, an API gateway, dashboards, authentication, a frontend and idempotency. Each one arrives in the lesson that needs it.

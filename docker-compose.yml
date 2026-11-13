@@ -1,0 +1,22 @@
+# Lesson 01: only PostgreSQL runs in Docker. The Order API runs on the host with
+# `dotnet run`, so its log is easy to show in its own pane, and k6 runs on the host too.
+#
+# Port 5433 (not 5432) so this lab does not clash with another local PostgreSQL.
+# No volume: `docker compose down` throws the data away, which is how the demo resets.
+services:
+  postgres:
+    image: postgres:16
+    container_name: tadka-mc-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: tadka
+      POSTGRES_PASSWORD: tadka_local   # local lab only, never a real credential
+      POSTGRES_DB: tadka
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tadka -d tadka"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
