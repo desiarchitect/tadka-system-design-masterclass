@@ -32,12 +32,7 @@ This branch proves one thing: an API can become slow because requests wait for a
 ### What to inspect first
 
 1. **Pool settings:** `src/Tadka.OrderApi/appsettings.json`, the connection string. `Maximum Pool Size=10` is the most connections this API instance will use at once. `Timeout=15` is how many seconds a request waits for a free pooled connection before it fails. This is the application-side pool. It is a different setting from PostgreSQL's own `max_connections`.
-2. **The artificial delay:** `src/Tadka.OrderApi/Data/OrderStore.cs`. The insert runs after `pg_sleep`, so each order holds its connection for `Demo:HoldMs` milliseconds (200 in `appsettings.Demo.json`). `pg_sleep` keeps the connection busy without using database CPU. **It is not a simulation of a slow production query.** It exists so the pool's behaviour is easy to see.
-3. **The two timers:** also in `OrderStore.cs`.
-   - `wait_ms`: from asking the pool for a connection until the pool hands one over.
-   - `db_ms`: from just before the database command runs until it completes. The `pg_sleep` delay is inside this number.
-
-   Each request writes one log line with `request_id`, `status`, `wait_ms`, `db_ms`, `total_ms` and, on failure, the exception.
+2. **No artificial delay in this lesson:** the pool-hold demo belongs to lesson 01. Here `Demo` only names the environment that enables the response-drop fault injection.
 
 ### The theory you will test
 

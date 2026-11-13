@@ -65,8 +65,27 @@ assert.ok(shifted.items.some(item => item.id === first.items[1].id), 'offset neg
 const next = await page(`&cursor=${encodeURIComponent(first.nextCursor)}`);
 assert.ok(next.items.every(item => item.id < first.items[1].id));
 assert.ok(next.items.every(item => !first.items.some(old => old.id === item.id)));
+// Last page signal: nextCursor is null when no more rows exist, including a page that holds exactly `limit` rows.
+const lastPageCustomer = customerId + 2;
+const lastPageBody = { ...order, customerId: lastPageCustomer };
+const pageFor = async (query = '') => {
+  const response = await fetch(`${base}/orders?customerId=${lastPageCustomer}&limit=2${query}`, { signal: AbortSignal.timeout(10000) });
+  assert.equal(response.status, 200);
+  return response.json();
+};
+await create(`${prefix}-last-a`, lastPageBody);
+await create(`${prefix}-last-b`, lastPageBody);
+const exact = await pageFor();
+assert.equal(exact.items.length, 2);
+assert.equal(exact.nextCursor, null, 'a page with exactly limit rows and nothing after it has no next cursor');
+await create(`${prefix}-last-c`, lastPageBody);
+const lastFull = await pageFor();
+assert.ok(lastFull.nextCursor, 'a third row means page one has a next cursor');
+const lastTail = await pageFor(`&cursor=${encodeURIComponent(lastFull.nextCursor)}`);
+assert.equal(lastTail.items.length, 1);
+assert.equal(lastTail.nextCursor, null, 'the final page has nextCursor null');
 assert.equal((await fetch(`${base}/orders?customerId=${customerId}&cursor=invalid`)).status, 400);
 assert.equal((await fetch(`${base}/orders?customerId=${customerId + 1}&cursor=${first.nextCursor}`)).status, 400);
 assert.equal((await fetch(`${base}/orders?customerId=${customerId}&limit=101`)).status, 400);
 assert.equal((await fetch(`${base}/orders?customerId=${customerId}&offset=1`)).status, 400);
-console.log(`Assertions passed: unsafe duplicates, concurrent replay, payload conflict, customer scope, post-commit disconnect, offset drift and cursor traversal. customerId=${customerId}`);
+console.log(`Assertions passed: unsafe duplicates, concurrent replay, payload conflict, customer scope, post-commit disconnect, offset drift and cursor traversal and last-page null cursor. customerId=${customerId}`);

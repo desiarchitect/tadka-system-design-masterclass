@@ -21,7 +21,7 @@ Both command blocks work in bash and PowerShell. Use `BASE_URL` to override the 
 
 ## API contract
 
-`POST /orders` accepts `{customerId,restaurantId,totalAmount}`. IDs must be positive; amount must fit NUMERIC(10,2) without rounding. A valid create returns `201`, `{id}`, and `Location: /orders/{id}`. GET that URL returns the persisted order, or `404`. Errors use Problem Details.
+`POST /orders` accepts `{customerId,restaurantId,totalAmount}`. IDs must be positive; amount must fit NUMERIC(10,2) without rounding. A valid create returns `201`, `{id}`, and a `Location` header holding the absolute URL of the new order, for example `http://localhost:5080/orders/63`. GET that URL returns the persisted order, or `404`. Errors use Problem Details.
 
 The optional `Idempotency-Key` header is 1..128 ASCII letters, digits or hyphens. No header is intentionally unsafe, for the negative control. With a key, identity is `(customer_id, key)` and payload equality compares restaurant and amount numerically. A matching replay returns the same status, resource ID and Location, plus `Idempotency-Replayed: true`. Different payload returns `409`. Invalid input returns `400`. A database outage returns `503`; a lost connection means outcome is unknown, not necessarily failed.
 
