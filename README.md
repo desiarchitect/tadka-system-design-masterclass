@@ -4,7 +4,16 @@ The practical case study for the Desi Architect System Design Masterclass. Each 
 
 **Inspect → Break → Diagnose → Evolve**
 
-## Branch: `lesson-01-baseline`
+## Branch: `lesson-07-api-contracts`
+
+Use [the Lesson 07 contract](docs/lessons/lesson-07-contract.md) for setup,
+commands, fault injection, assertions and limitations. The create path now uses
+an atomic database-backed idempotency key and has no artificial sleep. It adds
+bounded offset and cursor pages. Run `node scripts/verify-api-contracts.mjs`.
+
+The historical baseline notes below describe Lesson 01, not this branch's create path.
+
+## Historical baseline: `lesson-01-baseline`
 
 Lesson 01, *Inspect & Break: The Tadka Order API Under a Traffic Spike*.
 
