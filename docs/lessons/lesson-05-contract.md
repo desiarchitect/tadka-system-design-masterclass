@@ -29,10 +29,12 @@ dotnet run -c Release --project src/Tadka.NetworkingLab -- --serve
 In another terminal:
 
 ```text
-curl.exe --http1.1 --insecure --silent --output NUL --write-out "dns=%{time_namelookup} connect=%{time_connect} tls=%{time_appconnect} first_byte=%{time_starttransfer} total=%{time_total}\n" https://localhost:5443/probe
+curl.exe --http1.1 --insecure --silent --output NUL --write-out "dns=%{time_namelookup} connect=%{time_connect} tls=%{time_appconnect} first_byte=%{time_starttransfer} total=%{time_total}\n" https://127.0.0.1:5443/probe
 ```
 
 On bash use `curl`, `/dev/null` instead of `NUL`. The timing fields are cumulative milestones from transfer start, not independent phase durations. Subtract connect from appconnect for an approximate TLS interval on a fresh direct connection. `first_byte - tls` includes request transmission, server time and return transit, not only backend execution.
+
+The URL uses `127.0.0.1`, not `localhost`, because the probe listens on IPv4 loopback only. `localhost` can try IPv6 first and add a fake connect delay of about 200 ms.
 
 `--insecure` is only for this disposable loopback certificate. Never copy it into a production client. The automatic runner instead pins this run's exact certificate. No trust-store change is required. Stop serve mode with Ctrl+C.
 
