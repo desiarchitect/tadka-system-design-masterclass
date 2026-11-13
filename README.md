@@ -4,7 +4,16 @@ The practical case study for the Desi Architect System Design Masterclass. Each 
 
 **Inspect → Break → Diagnose → Evolve**
 
-## Branch: `lesson-01-baseline`
+## Branch: `lesson-05-networking`
+
+Start with [the Lesson 05 contract](docs/lessons/lesson-05-contract.md).
+Run `dotnet run -c Release --project src/Tadka.NetworkingLab` from the root.
+It asserts connection reuse with HTTP/1.1 and HTTP/2 and prints real request timings.
+It needs no database. HTTP/3 remains a board explanation, not a measured demo.
+
+The inherited baseline below is unchanged and is not needed for this networking experiment.
+
+## Inherited branch: `lesson-01-baseline`
 
 Lesson 01, *Inspect & Break: The Tadka Order API Under a Traffic Spike*.
 

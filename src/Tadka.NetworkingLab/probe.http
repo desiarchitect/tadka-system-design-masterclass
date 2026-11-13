@@ -1,0 +1,4 @@
+@baseUrl = https://localhost:5443
+
+### Disposable local certificate. Use a client configured for local certificate inspection.
+GET {{baseUrl}}/probe
