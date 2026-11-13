@@ -28,3 +28,21 @@ GET {{baseUrl}}/orders?customerId=1&limit=2&cursor=1:1
 
 ### Offset comparison
 GET {{baseUrl}}/orders?customerId=1&limit=2&pagination=offset&offset=2
+
+### Replace ID with the actual create result
+GET {{baseUrl}}/orders/1/status
+
+### Fixed local workflow: placed -> preparing -> ready -> delivered
+PATCH {{baseUrl}}/orders/1/status
+Content-Type: application/json
+
+{"status":"preparing"}
+
+### Current-state snapshot, then live events
+GET {{baseUrl}}/orders/1/events
+Accept: text/event-stream
+
+### Replay retained events after version 1 for this order
+GET {{baseUrl}}/orders/1/events
+Accept: text/event-stream
+Last-Event-ID: 1

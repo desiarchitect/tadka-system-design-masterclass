@@ -4,7 +4,14 @@ The practical case study for the Desi Architect System Design Masterclass. Each 
 
 **Inspect → Break → Diagnose → Evolve**
 
-## Branch: `lesson-07-api-contracts`
+## Branch: `lesson-08-realtime-sse`
+
+Start with [the Lesson 08 contract](docs/lessons/lesson-08-contract.md).
+This evolves Lesson 07 with persisted status versions and SSE replay.
+Run `node scripts/verify-realtime.mjs` as well as the inherited API checks.
+No WebSocket or broker is added. No frontend or production authorization is claimed.
+
+## Inherited branch: `lesson-07-api-contracts`
 
 Use [the Lesson 07 contract](docs/lessons/lesson-07-contract.md) for setup,
 commands, fault injection, assertions and limitations. The create path now uses

@@ -17,6 +17,7 @@ var connectionString = builder.Configuration.GetConnectionString("Tadka")
     ?? throw new InvalidOperationException("ConnectionStrings:Tadka is missing.");
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton<IOrderService, OrderStore>();
+builder.Services.AddSingleton<IOrderStatusService, OrderStatusService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
