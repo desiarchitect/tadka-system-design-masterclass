@@ -5,6 +5,7 @@ using Tadka.OrderApi.Modules.Catalog;
 using Tadka.OrderApi.Modules.DistributedIds;
 using Tadka.OrderApi.Modules.Indexing;
 using Tadka.OrderApi.Modules.Instance;
+using Tadka.OrderApi.Modules.Messaging;
 using Tadka.OrderApi.Modules.Orders;
 using Tadka.OrderApi.Modules.Replication;
 using Tadka.OrderApi.Modules.Sharding;
@@ -43,6 +44,7 @@ builder.Services.AddSingleton(_ => new SnowflakeIdGenerator(nodeId: 7));
 builder.Services.AddSingleton<DistributedIdLabService>();
 builder.Services.AddSingleton<ShardingLabService>();
 builder.Services.AddSingleton<InstanceLifecycleService>();
+builder.Services.AddSingleton<KafkaEventsLabService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
