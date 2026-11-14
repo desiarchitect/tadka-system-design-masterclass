@@ -1,6 +1,7 @@
 using Npgsql;
 using Tadka.OrderApi.Data;
 using Tadka.OrderApi.Modules.Catalog;
+using Tadka.OrderApi.Modules.DistributedIds;
 using Tadka.OrderApi.Modules.Indexing;
 using Tadka.OrderApi.Modules.Orders;
 
@@ -25,6 +26,8 @@ builder.Services.AddSingleton<ICatalogModule, CatalogModule>();
 builder.Services.AddSingleton<FlashDealService>();
 builder.Services.AddSingleton<IOrderCheckoutService, OrderCheckoutService>();
 builder.Services.AddSingleton<IndexingLabService>();
+builder.Services.AddSingleton(_ => new SnowflakeIdGenerator(nodeId: 7));
+builder.Services.AddSingleton<DistributedIdLabService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();

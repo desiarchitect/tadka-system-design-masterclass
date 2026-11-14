@@ -89,3 +89,24 @@ FROM generate_series(1, 25000) AS s(i);
 
 -- Populate pg_statistic and the PostgreSQL visibility map (all_visible) from clean startup.
 VACUUM ANALYZE orders;
+
+-- Lesson 15: Distributed ID B-tree index locality benchmark tables (UUIDv4 vs UUIDv7 vs Snowflake INT8)
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
+
+CREATE TABLE IF NOT EXISTS id_bench_uuidv4 (
+    id         UUID        PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    payload    TEXT        NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS id_bench_uuidv7 (
+    id         UUID        PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    payload    TEXT        NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS id_bench_snowflake (
+    id         BIGINT      PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    payload    TEXT        NOT NULL
+);
