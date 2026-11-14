@@ -6,6 +6,7 @@ using Tadka.OrderApi.Modules.DistributedIds;
 using Tadka.OrderApi.Modules.Indexing;
 using Tadka.OrderApi.Modules.Instance;
 using Tadka.OrderApi.Modules.Orders;
+using Tadka.OrderApi.Modules.OverloadProtection;
 using Tadka.OrderApi.Modules.Replication;
 using Tadka.OrderApi.Modules.Resilience;
 using Tadka.OrderApi.Modules.Sharding;
@@ -45,6 +46,7 @@ builder.Services.AddSingleton<DistributedIdLabService>();
 builder.Services.AddSingleton<ShardingLabService>();
 builder.Services.AddSingleton<InstanceLifecycleService>();
 builder.Services.AddSingleton<ResilienceLabService>();
+builder.Services.AddSingleton<OverloadProtectionLabService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
