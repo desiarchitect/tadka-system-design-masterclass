@@ -164,3 +164,111 @@ CREATE TABLE IF NOT EXISTS shard_3.sharded_orders (
 );
 CREATE INDEX IF NOT EXISTS shard_3_customer_idx ON shard_3.sharded_orders (customer_id, created_at DESC, order_id DESC);
 CREATE INDEX IF NOT EXISTS shard_3_restaurant_idx ON shard_3.sharded_orders (restaurant_id, created_at DESC, order_id DESC);
+
+-- Lesson 32: Reliable messaging (idempotent consumer ledger + DLQ audit table)
+CREATE TABLE IF NOT EXISTS consumer_loyalty_ledger (
+    customer_id     BIGINT        PRIMARY KEY,
+    points_balance  INT           NOT NULL DEFAULT 0,
+    credit_count    INT           NOT NULL DEFAULT 0,
+    updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS processed_consumer_events (
+    event_id        VARCHAR(128)  NOT NULL,
+    consumer_group  VARCHAR(128)  NOT NULL,
+    order_id        BIGINT        NOT NULL,
+    customer_id     BIGINT        NOT NULL,
+    points_awarded  INT           NOT NULL,
+    processed_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (event_id, consumer_group)
+);
+
+CREATE TABLE IF NOT EXISTS consumer_dlq_records (
+    id              BIGSERIAL     PRIMARY KEY,
+    event_id        VARCHAR(128)  NOT NULL UNIQUE,
+    original_topic  VARCHAR(128)  NOT NULL,
+    dlq_topic       VARCHAR(128)  NOT NULL,
+    partition_id    INT           NOT NULL,
+    offset_value    BIGINT        NOT NULL,
+    attempt_count   INT           NOT NULL,
+    failure_reason  TEXT          NOT NULL,
+    raw_payload     TEXT          NOT NULL,
+    routed_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+-- Lesson 34 & 35: Transactional Outbox + Orchestrated Saga state and compensation audit
+CREATE TABLE IF NOT EXISTS outbox_events (
+    id               BIGSERIAL     PRIMARY KEY,
+    event_id         VARCHAR(128)  NOT NULL UNIQUE,
+    aggregate_type   VARCHAR(64)   NOT NULL,
+    aggregate_id     BIGINT        NOT NULL,
+    event_type       VARCHAR(64)   NOT NULL,
+    payload          JSONB         NOT NULL,
+    created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    published_at     TIMESTAMPTZ   NULL,
+    publish_attempts INT           NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_unpublished
+    ON outbox_events (created_at ASC, id ASC)
+    WHERE published_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS saga_executions (
+    saga_id               VARCHAR(128)  PRIMARY KEY,
+    order_id              BIGINT        NOT NULL,
+    menu_item_id          BIGINT        NOT NULL,
+    quantity              INT           NOT NULL,
+    scenario              VARCHAR(64)   NOT NULL,
+    current_state         VARCHAR(64)   NOT NULL,
+    inventory_reserved    BOOLEAN       NOT NULL DEFAULT FALSE,
+    inventory_compensated BOOLEAN       NOT NULL DEFAULT FALSE,
+    payment_captured      BOOLEAN       NOT NULL DEFAULT FALSE,
+    payment_refunded      BOOLEAN       NOT NULL DEFAULT FALSE,
+    kitchen_accepted      BOOLEAN       NOT NULL DEFAULT FALSE,
+    compensation_attempts INT           NOT NULL DEFAULT 0,
+    step_log              JSONB         NOT NULL DEFAULT '[]'::jsonb,
+    created_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+-- Lesson 36: Capstone UPI Payment Gateway, Double-Entry Ledger & Webhook Reconciliation
+CREATE TABLE IF NOT EXISTS payment_intents (
+    id                 BIGSERIAL     PRIMARY KEY,
+    intent_ref         VARCHAR(64)   NOT NULL UNIQUE,
+    order_id           BIGINT        NOT NULL REFERENCES orders(id),
+    customer_id        BIGINT        NOT NULL,
+    amount_paise       BIGINT        NOT NULL CHECK (amount_paise > 0),
+    currency           VARCHAR(8)    NOT NULL DEFAULT 'INR',
+    payer_vpa          VARCHAR(128)  NOT NULL,
+    idempotency_key    VARCHAR(128)  NOT NULL,
+    payload_hash       VARCHAR(128)  NOT NULL,
+    status             VARCHAR(32)   NOT NULL DEFAULT 'PENDING',
+    psp_rrn            VARCHAR(64)   NULL,
+    webhook_deliveries INT           NOT NULL DEFAULT 0,
+    created_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    UNIQUE (customer_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS ledger_entries (
+    id              BIGSERIAL     PRIMARY KEY,
+    transaction_ref VARCHAR(64)   NOT NULL,
+    intent_ref      VARCHAR(64)   NOT NULL REFERENCES payment_intents(intent_ref),
+    order_id        BIGINT        NOT NULL,
+    account_code    VARCHAR(64)   NOT NULL,
+    direction       VARCHAR(8)    NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')),
+    amount_paise    BIGINT        NOT NULL CHECK (amount_paise > 0),
+    signed_amount   BIGINT        NOT NULL,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_intent_ref ON ledger_entries (intent_ref);
+
+CREATE TABLE IF NOT EXISTS payment_webhook_events (
+    id              BIGSERIAL     PRIMARY KEY,
+    webhook_id      VARCHAR(128)  NOT NULL,
+    intent_ref      VARCHAR(64)   NOT NULL,
+    reported_status VARCHAR(32)   NOT NULL,
+    psp_rrn         VARCHAR(64)   NULL,
+    processing_mode VARCHAR(16)   NOT NULL,
+    outcome         VARCHAR(64)   NOT NULL,
+    received_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);

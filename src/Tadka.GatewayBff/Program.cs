@@ -650,6 +650,133 @@ app.MapPost("/api/observability/trace-order", async (HttpContext http, IHttpClie
     }, statusCode: (int)upstreamRes.StatusCode);
 });
 
+app.MapGet("/api/v1/tadka/architecture", async (HttpContext http, IHttpClientFactory clientFactory, CancellationToken ct) =>
+{
+    var correlationId = (string)http.Items["CorrelationId"]!;
+    var clientType = (string)http.Items["ClientType"]!;
+    var client = clientFactory.CreateClient("OrderApi");
+
+    using var upstreamReq = new HttpRequestMessage(HttpMethod.Get, "/v1/tadka/architecture");
+    upstreamReq.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
+
+    using var upstreamRes = await client.SendAsync(upstreamReq, ct);
+    var bodyText = await upstreamRes.Content.ReadAsStringAsync(ct);
+    JsonElement? upstreamJson = null;
+    if (!string.IsNullOrWhiteSpace(bodyText))
+    {
+        using var doc = JsonDocument.Parse(bodyText);
+        upstreamJson = doc.RootElement.Clone();
+    }
+
+    return Results.Json(new
+    {
+        gateway = new
+        {
+            service = "Tadka.GatewayBff",
+            clientType,
+            correlationId,
+            configuredNodes = orderApiNodes
+        },
+        upstream = upstreamJson
+    }, statusCode: (int)upstreamRes.StatusCode);
+});
+
+app.MapPost("/api/v1/tadka/orders/checkout", async (HttpContext http, IHttpClientFactory clientFactory, CancellationToken ct) =>
+{
+    var correlationId = (string)http.Items["CorrelationId"]!;
+    var clientType = (string)http.Items["ClientType"]!;
+    var incomingTraceparent = http.Request.Headers["traceparent"].FirstOrDefault();
+    var hasParent = !string.IsNullOrWhiteSpace(incomingTraceparent)
+        && ActivityContext.TryParse(incomingTraceparent, null, out var parsedParent);
+
+    string rawBody;
+    using (var reader = new StreamReader(http.Request.Body, Encoding.UTF8, leaveOpen: true))
+    {
+        rawBody = await reader.ReadToEndAsync(ct);
+    }
+    if (string.IsNullOrWhiteSpace(rawBody))
+        rawBody = "{}";
+
+    using var gatewayActivity = hasParent
+        ? gatewayActivitySource.StartActivity("gateway.v1.post_checkout", ActivityKind.Server, parsedParent)
+        : gatewayActivitySource.StartActivity("gateway.v1.post_checkout", ActivityKind.Server);
+
+    var traceId = gatewayActivity?.TraceId.ToHexString() ?? ActivityTraceId.CreateRandom().ToHexString();
+    var gatewaySpanId = gatewayActivity?.SpanId.ToHexString() ?? ActivitySpanId.CreateRandom().ToHexString();
+    var traceparentOut = $"00-{traceId}-{gatewaySpanId}-01";
+    var startedAtUtc = DateTime.UtcNow;
+    var sw = Stopwatch.StartNew();
+
+    var client = clientFactory.CreateClient("OrderApi");
+    using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, "/v1/tadka/orders/checkout")
+    {
+        Content = new StringContent(rawBody, Encoding.UTF8, "application/json")
+    };
+    upstreamReq.Headers.TryAddWithoutValidation("traceparent", traceparentOut);
+    upstreamReq.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
+    upstreamReq.Headers.TryAddWithoutValidation("X-Tadka-Client", clientType);
+    if (http.Request.Headers.TryGetValue("Idempotency-Key", out var idemValues))
+    {
+        var key = idemValues.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(key))
+            upstreamReq.Headers.TryAddWithoutValidation("Idempotency-Key", key);
+    }
+
+    using var upstreamRes = await client.SendAsync(upstreamReq, ct);
+    var upstreamBodyText = await upstreamRes.Content.ReadAsStringAsync(ct);
+    sw.Stop();
+    gatewayActivity?.Stop();
+
+    var ingestPayload = new
+    {
+        traceId,
+        spanId = gatewaySpanId,
+        parentSpanId = hasParent ? parsedParent.SpanId.ToHexString() : "0000000000000000",
+        service = "gateway-bff",
+        operation = "gateway.v1.post_checkout",
+        durationMs = Math.Round(sw.Elapsed.TotalMilliseconds, 3),
+        status = upstreamRes.IsSuccessStatusCode ? "ok" : "error",
+        startedAtUtc,
+        attributes = new Dictionary<string, string>
+        {
+            ["http.route"] = "/api/v1/tadka/orders/checkout",
+            ["http.status_code"] = ((int)upstreamRes.StatusCode).ToString(),
+            ["tadka.client"] = clientType
+        }
+    };
+    using var ingestRes = await client.PostAsJsonAsync("/observability/spans/ingest", ingestPayload, ct);
+
+    if (upstreamRes.Headers.TryGetValues("Idempotency-Status", out var idemStatus))
+        http.Response.Headers["Idempotency-Status"] = idemStatus.FirstOrDefault() ?? "NONE";
+    http.Response.Headers["X-Correlation-Id"] = correlationId;
+    http.Response.Headers["X-Trace-Id"] = traceId;
+    http.Response.Headers["traceparent"] = traceparentOut;
+
+    JsonElement? upstreamJson = null;
+    if (!string.IsNullOrWhiteSpace(upstreamBodyText))
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(upstreamBodyText);
+            upstreamJson = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            upstreamJson = null;
+        }
+    }
+
+    return Results.Json(new
+    {
+        traceId,
+        traceparent = traceparentOut,
+        gatewaySpanId,
+        orderApiStatusCode = (int)upstreamRes.StatusCode,
+        durationMs = Math.Round(sw.Elapsed.TotalMilliseconds, 3),
+        upstream = upstreamJson
+    }, statusCode: (int)upstreamRes.StatusCode);
+});
+
 app.Run();
 
 static void CopyCacheHeaders(HttpResponseMessage upstream, IHeaderDictionary downstreamHeaders)

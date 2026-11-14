@@ -543,7 +543,7 @@ public sealed partial class ObservabilityLabService : IDisposable
         return sum % 10 == 0;
     }
 
-    private void RecordSpan(TraceSpanRecord span)
+    public void RecordSpan(TraceSpanRecord span)
     {
         lock (_telemetryGate)
         {
@@ -565,7 +565,7 @@ public sealed partial class ObservabilityLabService : IDisposable
         }
     }
 
-    private void AppendStructuredLog(StructuredLogEntry entry)
+    public void AppendStructuredLog(StructuredLogEntry entry)
     {
         lock (_telemetryGate)
         {
@@ -579,7 +579,7 @@ public sealed partial class ObservabilityLabService : IDisposable
         }
     }
 
-    private void RecordPoolAcquireSample(double waitMs, int currentActive)
+    public void RecordPoolAcquireSample(double waitMs, int currentActive)
     {
         lock (_telemetryGate)
         {
@@ -592,7 +592,7 @@ public sealed partial class ObservabilityLabService : IDisposable
         }
     }
 
-    private void RecordRedMetricSample(
+    public void RecordRedMetricSample(
         string service,
         string route,
         string method,
