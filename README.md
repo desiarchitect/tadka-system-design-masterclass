@@ -26,9 +26,13 @@ different lessons.
 | `lesson-24-cache-stampede` | 20-request cache stampede reproduction vs in-process single-flight request coalescing and TTL jitter | `docs/lessons/lesson-24-contract.md` |
 | `lesson-26-http-edge-caching` | Strong SHA256 `ETag`, `If-None-Match` (`304`), `Cache-Control`, `private, no-store` receipts & gateway edge cache simulator | `docs/lessons/lesson-26-contract.md` |
 | `lesson-27-load-balancing` | 2-node `OrderApi` cluster (`:5080`, `:5082`), L7 round-robin & least-requests LB, `/health/ready` vs `/health/live` & draining | `docs/lessons/lesson-27-contract.md` |
+| `lesson-31-kafka-events` | Kafka 3.8 KRaft (`127.0.0.1:9092`), 4-partition `tadka.order.events`, per-key ordering, 2 vs 5 consumer group rebalance & commits | `docs/lessons/lesson-31-contract.md` |
+| `lesson-32-reliable-consumers` | Transactional `processed_consumer_events` deduplication vs `3x` credit, poison-pill backoff (`100/200/400` ms) to `tadka.order.reliable.dlq` | `docs/lessons/lesson-32-contract.md` |
+| `lesson-34-outbox-saga` | Dual-write failures (`Ghost Order`/`Phantom Event`), `outbox_events` (`idx_outbox_unpublished`, `FOR UPDATE SKIP LOCKED`), pre-mark crash recovery & idempotent Saga compensations | `docs/lessons/lesson-34-contract.md` |
+| `lesson-36-upi-payment-workflow` | Capstone UPI intent idempotency (`201`/`200`/`409`), constant-time HMAC webhooks, `FOR UPDATE` monotonic state machine, 4-leg integer-paise double-entry ledger & `/payments/upi/reconcile` | `docs/lessons/lesson-36-contract.md` |
 
-Lessons 02, 03, 04, 06, 09, 13, 17, 19, 20, 21, 22, 25 and 28 are board or whiteboard case-study lessons and do not need separate code branches.
-Later module branches (Module 5+) are not published yet.
+Lessons 02, 03, 04, 06, 09, 13, 17, 19, 20, 21, 22, 25, 28, 29, 30 and 33 are board or whiteboard case-study lessons and do not need separate code branches (Lesson 35 shares `lesson-34-outbox-saga`).
+Later module branches (Module 6+) are not published yet.
 
 ## Get a lesson
 
@@ -45,9 +49,9 @@ HTTPS server and asserts connection reuse. It does not need PostgreSQL or Docker
 Request timings are observations from your machine, not promised benchmarks.
 HTTP/3 is explained in the lesson but is not implemented in the probe.
 
-For Lessons 07, 08, 10, 11, 12, 14, 15, 16, 18, 23, 24, 26 and 27, install .NET 10, Docker and Node 22+, switch to the branch,
+For Lessons 07, 08, 10, 11, 12, 14, 15, 16, 18, 23, 24, 26, 27, 31, 32, 34 and 36, install .NET 10, Docker and Node 22+, switch to the branch,
 then follow its contract. Run one lesson API/database at a time because they share
-ports 5080 and 5433 (Lessons 11, 26 and 27 also use port 5081 for `Tadka.GatewayBff`; Lessons 16 and 18 run `postgres-replica` on port 5434; Lessons 23, 24, 26 and 27 run Redis on port 6379; Lesson 27 also runs a second `OrderApi` node on port 5082). Stop only that lesson's Compose project before switching.
+ports 5080 and 5433 (Lessons 11, 26 and 27 also use port 5081 for `Tadka.GatewayBff`; Lessons 16 and 18 run `postgres-replica` on port 5434; Lessons 23, 24, 26, 27, 31, 32, 34 and 36 run Redis on port 6379; Lesson 27 also runs a second `OrderApi` node on port 5082; Lessons 31, 32, 34 and 36 run `apache/kafka:3.8.0` KRaft on port 9092). Stop only that lesson's Compose project before switching.
 The databases and caches are disposable. API-only restart preserves PostgreSQL data; database teardown
 resets it.
 
@@ -67,10 +71,16 @@ and 4-shard routing. Module 4 (`lesson-23-caching-strategies` through `lesson-27
 builds forward from `lesson-18-sharding`, adding `redis:7.4-alpine` (`allkeys-lru`),
 in-process single-flight and TTL jitter, HTTP strong `ETag` and `Cache-Control` semantics,
 a simulated gateway edge cache, and 2-node L7 load balancing with active readiness checks
-and graceful draining. Networking does
-not silently change the Order API.
+and graceful draining. Module 5 (`lesson-31-kafka-events` through `lesson-36-upi-payment-workflow`)
+builds forward from `lesson-27-load-balancing`, adding single-broker Apache Kafka 3.8.0 KRaft
+(`127.0.0.1:9092`), 4-partition topics and `CooperativeSticky` consumer groups, transactional SQL
+deduplication and Dead Letter Queue (`tadka.order.reliable.dlq`), `outbox_events` with partial
+index and `FOR UPDATE SKIP LOCKED` relay, idempotent Flash Deal Saga compensations, and an
+end-to-end UPI payment workflow (`payment_intents`, constant-time HMAC-SHA256 webhooks, 4-leg
+integer-paise double-entry `ledger_entries` summing to `0`, and status reconciliation).
+Networking does not silently change the Order API.
 
-Lessons 07, 08, 10, 11, 12, 14, 15, 16, 18, 23, 24, 26 and 27 keep normal checkout/read paths free of hidden artificial sleep (Lesson 24 exposes a disclosed `dbDelayMs` parameter on `/menu-stampede` so concurrent misses overlap on localhost, and Lesson 27 exposes a disclosed `slowMs` fault parameter on `/diagnostics/instance/state`).
+Lessons 07, 08, 10, 11, 12, 14, 15, 16, 18, 23, 24, 26, 27, 31, 32, 34 and 36 keep normal checkout/read paths free of hidden artificial sleep (Lesson 24 exposes a disclosed `dbDelayMs` parameter on `/menu-stampede` so concurrent misses overlap on localhost, Lesson 27 exposes a disclosed `slowMs` fault parameter on `/diagnostics/instance/state`, and Lessons 31 to 36 expose explicit `/diagnostics/*` and `/payments/upi/reconcile` simulation parameters for local failure reproduction).
 Their assertion scripts first reproduce unsafe or broken behaviour, then verify the fix.
 The labs have been run repeatedly from clean state; a timed recording
 rehearsal is still required on the instructor's machine.
@@ -80,6 +90,8 @@ the labs are caller supplied; there is no production authentication or authoriza
 An order ID, cursor, client marker or SSE event ID is not a security credential.
 Do not expose these labs publicly.
 
-No message broker, Kubernetes cluster or browser UI is required by these
-Module 0 to 4 labs. Follow each branch's contract for measurement boundaries, cleanup
-and what the experiment does not prove.
+Module 0 to 4 labs require PostgreSQL (and Redis in Module 4) with no message broker; Module 5
+(`lesson-31-kafka-events` through `lesson-36-upi-payment-workflow`) runs a single-broker Apache
+Kafka 3.8.0 KRaft container alongside PostgreSQL and Redis via Docker Compose. No Kubernetes
+cluster or browser UI is required by these Module 0 to 5 labs. Follow each branch's contract for
+measurement boundaries, cleanup and what the experiment does not prove.
