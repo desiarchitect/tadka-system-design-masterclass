@@ -4,6 +4,7 @@ using Tadka.OrderApi.Data;
 using Tadka.OrderApi.Modules.Catalog;
 using Tadka.OrderApi.Modules.DistributedIds;
 using Tadka.OrderApi.Modules.Indexing;
+using Tadka.OrderApi.Modules.Instance;
 using Tadka.OrderApi.Modules.Orders;
 using Tadka.OrderApi.Modules.Replication;
 using Tadka.OrderApi.Modules.Sharding;
@@ -41,6 +42,7 @@ builder.Services.AddSingleton<IndexingLabService>();
 builder.Services.AddSingleton(_ => new SnowflakeIdGenerator(nodeId: 7));
 builder.Services.AddSingleton<DistributedIdLabService>();
 builder.Services.AddSingleton<ShardingLabService>();
+builder.Services.AddSingleton<InstanceLifecycleService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
@@ -49,9 +51,10 @@ builder.Services.AddExceptionHandler<Tadka.OrderApi.Middleware.DatabaseException
 var app = builder.Build();
 
 var csb = new NpgsqlConnectionStringBuilder(connectionString);
+var lifecycle = app.Services.GetRequiredService<InstanceLifecycleService>();
 app.Logger.LogWarning(
-    "contract_config max_pool_size={MaxPoolSize} pool_timeout_s={Timeout} artificial_delay=false environment={Env}",
-    csb.MaxPoolSize, csb.Timeout, app.Environment.EnvironmentName);
+    "contract_config instance_id={InstanceId} max_pool_size={MaxPoolSize} pool_timeout_s={Timeout} artificial_delay=false environment={Env}",
+    lifecycle.InstanceId, csb.MaxPoolSize, csb.Timeout, app.Environment.EnvironmentName);
 
 app.Use(async (context, next) =>
 {
@@ -62,17 +65,33 @@ app.Use(async (context, next) =>
     context.Response.OnStarting(() =>
     {
         context.Response.Headers["X-Correlation-Id"] = correlationId;
+        context.Response.Headers["X-Instance-Id"] = lifecycle.InstanceId;
         return Task.CompletedTask;
     });
 
-    using (app.Logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
+    var path = context.Request.Path.Value ?? string.Empty;
+    var trackRequest =
+        !path.StartsWith("/health", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("/diagnostics/instance/state", StringComparison.OrdinalIgnoreCase);
+
+    if (trackRequest)
+        lifecycle.BeginRequest(countServed: true);
+
+    try
     {
-        await next();
+        using (app.Logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
+        {
+            await next();
+        }
+    }
+    finally
+    {
+        if (trackRequest)
+            lifecycle.EndRequest();
     }
 });
 
 app.UseExceptionHandler();
 app.MapControllers();
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.Run();

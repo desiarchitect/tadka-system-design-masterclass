@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
+using Tadka.OrderApi.Modules.Instance;
 
 namespace Tadka.OrderApi.Modules.Catalog;
 
@@ -12,6 +13,7 @@ public sealed record UpdateMenuItemRequest(decimal? Price, bool? IsAvailable);
 [Route("catalog/restaurants/{restaurantId:long}")]
 public sealed class CatalogController(
     MenuCacheService menuCache,
+    InstanceLifecycleService lifecycle,
     ILogger<CatalogController> logger,
     IWebHostEnvironment environment) : ControllerBase
 {
@@ -27,6 +29,19 @@ public sealed class CatalogController(
     {
         if (restaurantId <= 0)
             return Problem(statusCode: 400, title: "Restaurant ID must be positive.");
+
+        if (lifecycle.State == "unhealthy")
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = "Instance is unhealthy",
+                instanceId = lifecycle.InstanceId
+            });
+        }
+
+        var slowMs = lifecycle.SlowMs;
+        if (slowMs > 0)
+            await Task.Delay(slowMs, ct);
 
         var effectiveStrategy = string.IsNullOrWhiteSpace(strategy) ? "cache-aside" : strategy.Trim().ToLowerInvariant();
         if (effectiveStrategy is not ("cache-aside" or "bypass"))

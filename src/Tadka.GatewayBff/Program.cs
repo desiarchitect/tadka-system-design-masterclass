@@ -15,6 +15,11 @@ builder.Logging.AddSimpleConsole(o =>
 
 var orderApiBaseUrl = builder.Configuration["Upstream:OrderApiBaseUrl"]
     ?? throw new InvalidOperationException("Upstream:OrderApiBaseUrl is missing.");
+var configuredNodes = builder.Configuration.GetSection("Upstream:OrderApiNodes").Get<string[]>();
+var envNodesRaw = Environment.GetEnvironmentVariable("ORDER_API_NODES");
+var orderApiNodes = !string.IsNullOrWhiteSpace(envNodesRaw)
+    ? envNodesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    : (configuredNodes is { Length: > 0 } ? configuredNodes : [orderApiBaseUrl]);
 var catalogTimeoutMs = builder.Configuration.GetValue<int?>("Upstream:CatalogTimeoutMs") ?? 1500;
 const int EdgeTtlSeconds = 15;
 
@@ -24,12 +29,17 @@ builder.Services.AddHttpClient("OrderApi", client =>
     client.BaseAddress = new Uri(orderApiBaseUrl);
     client.Timeout = TimeSpan.FromSeconds(10);
 });
+builder.Services.AddHttpClient("OrderApiNode", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 
 var app = builder.Build();
 
+var lbPool = new LoadBalancerPool(orderApiNodes, app.Logger);
 app.Logger.LogWarning(
-    "gateway_config upstream_order_api={Upstream} catalog_timeout_ms={TimeoutMs} edge_ttl_s={EdgeTtl} environment={Env}",
-    orderApiBaseUrl, catalogTimeoutMs, EdgeTtlSeconds, app.Environment.EnvironmentName);
+    "gateway_config upstream_order_api={Upstream} lb_nodes={LbNodes} catalog_timeout_ms={TimeoutMs} edge_ttl_s={EdgeTtl} environment={Env}",
+    orderApiBaseUrl, string.Join(",", orderApiNodes), catalogTimeoutMs, EdgeTtlSeconds, app.Environment.EnvironmentName);
 
 var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var internalNaivePattern = new Regex(@"^/api/orders/\d+/naive-join-receipt$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -110,27 +120,88 @@ app.MapGet("/diagnostics/edge-cache/stats", () =>
     });
 });
 
-app.MapGet("/api/catalog/restaurants/{restaurantId:long}/menu", async (
-    long restaurantId,
-    HttpContext context,
-    IHttpClientFactory httpClientFactory,
-    CancellationToken ct) =>
+app.MapPost("/diagnostics/lb/config", async (
+    string? algorithm,
+    bool? healthCheckEnabled,
+    bool? resetStats,
+    HttpContext context) =>
 {
-    var correlationId = (string)context.Items["CorrelationId"]!;
-    var client = httpClientFactory.CreateClient("OrderApi");
-    using var request = new HttpRequestMessage(HttpMethod.Get, $"/catalog/restaurants/{restaurantId}/menu");
-    request.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
-    ForwardDemoCatalogFailureHeader(context, request, app.Environment);
-    if (context.Request.Headers.TryGetValue("If-None-Match", out var ifNoneMatch))
+    LbConfigRequest? body = null;
+    if (context.Request.ContentLength is > 0 || context.Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) == true)
     {
-        foreach (var val in ifNoneMatch)
-            request.Headers.TryAddWithoutValidation("If-None-Match", val);
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync<LbConfigRequest>(context.Request.Body, jsonOptions, context.RequestAborted);
+        }
+        catch (JsonException)
+        {
+            return Results.Problem(statusCode: 400, title: "Invalid JSON payload.");
+        }
     }
 
     try
     {
+        var snapshot = lbPool.Configure(
+            algorithm ?? body?.Algorithm,
+            healthCheckEnabled ?? body?.HealthCheckEnabled,
+            (resetStats ?? false) || (body?.ResetStats ?? false));
+        return Results.Ok(snapshot);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.Problem(statusCode: 400, title: ex.Message);
+    }
+});
+
+app.MapPost("/diagnostics/lb/probe", async (
+    IHttpClientFactory httpClientFactory,
+    CancellationToken ct) =>
+{
+    await lbPool.ProbeAllAsync(httpClientFactory, ct);
+    return Results.Ok(lbPool.GetStatus());
+});
+
+app.MapGet("/diagnostics/lb/status", () => Results.Ok(lbPool.GetStatus()));
+
+async Task<IResult> RouteCatalogMenuThroughPoolAsync(
+    long restaurantId,
+    HttpContext context,
+    IHttpClientFactory httpClientFactory,
+    CancellationToken ct)
+{
+    var correlationId = (string)context.Items["CorrelationId"]!;
+    await lbPool.EnsureInitialProbeAsync(httpClientFactory, ct);
+
+    if (!lbPool.TryLeaseNode(out var node) || node is null)
+    {
+        context.Response.Headers["X-LB-Algorithm"] = lbPool.Algorithm;
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "No healthy upstream OrderApi instances available.");
+    }
+
+    try
+    {
+        var client = httpClientFactory.CreateClient("OrderApiNode");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{node.Url}/catalog/restaurants/{restaurantId}/menu");
+        request.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
+        ForwardDemoCatalogFailureHeader(context, request, app.Environment);
+        if (context.Request.Headers.TryGetValue("If-None-Match", out var ifNoneMatch))
+        {
+            foreach (var val in ifNoneMatch)
+                request.Headers.TryAddWithoutValidation("If-None-Match", val);
+        }
+
+        context.Response.Headers["X-Upstream-Instance"] = node.InstanceId;
+        context.Response.Headers["X-Upstream-Url"] = node.Url;
+        context.Response.Headers["X-LB-Algorithm"] = lbPool.Algorithm;
+
         using var response = await client.SendAsync(request, ct);
         CopyCacheHeaders(response, context.Response.Headers);
+        if (response.Headers.TryGetValues("X-Instance-Id", out var upstreamIds))
+        {
+            var actualId = string.Join(",", upstreamIds);
+            context.Response.Headers["X-Instance-Id"] = actualId;
+            context.Response.Headers["X-Upstream-Instance"] = actualId;
+        }
 
         if (response.StatusCode == HttpStatusCode.NotModified)
             return Results.StatusCode(StatusCodes.Status304NotModified);
@@ -141,10 +212,17 @@ app.MapGet("/api/catalog/restaurants/{restaurantId:long}/menu", async (
     }
     catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
     {
-        app.Logger.LogError(ex, "gw_upstream_menu_failed correlation_id={CorrelationId}", correlationId);
+        app.Logger.LogError(ex, "gw_upstream_menu_failed instance={Instance} correlation_id={CorrelationId}", node.InstanceId, correlationId);
         return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "Upstream Order API unavailable.");
     }
-});
+    finally
+    {
+        lbPool.ReleaseNode(node);
+    }
+}
+
+app.MapGet("/api/catalog/restaurants/{restaurantId:long}/menu", RouteCatalogMenuThroughPoolAsync);
+app.MapGet("/api/lb/catalog/restaurants/{restaurantId:long}/menu", RouteCatalogMenuThroughPoolAsync);
 
 app.MapGet("/api/edge/catalog/restaurants/{restaurantId:long}/menu", async (
     long restaurantId,
@@ -589,3 +667,215 @@ internal sealed record PartnerOrderResponse(
     IReadOnlyList<UpstreamReceiptLine> Items,
     bool CatalogDegraded,
     string CorrelationId);
+
+internal sealed record LbConfigRequest(string? Algorithm, bool? HealthCheckEnabled, bool? ResetStats);
+internal sealed record HealthReadyPayload(string? Status, string? InstanceId, string? State);
+
+internal sealed class PoolNodeState(string url, string defaultInstanceId)
+{
+    public string Url { get; } = url.TrimEnd('/');
+    public string InstanceId { get; set; } = defaultInstanceId;
+    public bool Healthy { get; set; } = true;
+    public int ActiveRequests { get; set; }
+    public long TotalRouted { get; set; }
+    public int LastStatusCode { get; set; } = 200;
+}
+
+internal sealed class LoadBalancerPool
+{
+    private readonly object _gate = new();
+    private readonly SemaphoreSlim _probeLock = new(1, 1);
+    private readonly List<PoolNodeState> _nodes;
+    private readonly ILogger _logger;
+    private string _algorithm = "round-robin";
+    private bool _healthCheckEnabled = true;
+    private bool _hasProbed;
+    private long _rrCounter;
+
+    public LoadBalancerPool(IEnumerable<string> nodeUrls, ILogger logger)
+    {
+        _logger = logger;
+        var list = nodeUrls
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Select(u => u.Trim().TrimEnd('/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        _nodes = list.Select((url, idx) =>
+        {
+            var fallbackId = idx switch
+            {
+                0 => "node-a",
+                1 => "node-b",
+                _ => $"node-{idx}"
+            };
+            return new PoolNodeState(url, fallbackId);
+        }).ToList();
+    }
+
+    public string Algorithm
+    {
+        get { lock (_gate) return _algorithm; }
+    }
+
+    public object Configure(string? algorithm, bool? healthCheckEnabled, bool resetStats)
+    {
+        lock (_gate)
+        {
+            if (!string.IsNullOrWhiteSpace(algorithm))
+            {
+                var normalized = algorithm.Trim().ToLowerInvariant();
+                if (normalized is not ("round-robin" or "least-requests"))
+                    throw new ArgumentException("algorithm must be 'round-robin' or 'least-requests'.");
+                _algorithm = normalized;
+            }
+
+            if (healthCheckEnabled is { } hc)
+                _healthCheckEnabled = hc;
+
+            if (resetStats)
+            {
+                _rrCounter = 0;
+                foreach (var n in _nodes)
+                    n.TotalRouted = 0;
+            }
+
+            return GetStatusUnsafe();
+        }
+    }
+
+    public async Task EnsureInitialProbeAsync(IHttpClientFactory httpClientFactory, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (_hasProbed) return;
+        }
+
+        await _probeLock.WaitAsync(ct);
+        try
+        {
+            lock (_gate)
+            {
+                if (_hasProbed) return;
+            }
+
+            await ProbeAllAsync(httpClientFactory, ct);
+        }
+        finally
+        {
+            _probeLock.Release();
+        }
+    }
+
+    public async Task ProbeAllAsync(IHttpClientFactory httpClientFactory, CancellationToken ct)
+    {
+        var client = httpClientFactory.CreateClient("OrderApiNode");
+        List<PoolNodeState> snapshot;
+        lock (_gate) snapshot = _nodes.ToList();
+
+        foreach (var node in snapshot)
+        {
+            var healthy = false;
+            var statusCode = 0;
+            string? probedId = null;
+
+            try
+            {
+                using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                probeCts.CancelAfter(TimeSpan.FromMilliseconds(1000));
+                using var resp = await client.GetAsync($"{node.Url}/health/ready", probeCts.Token);
+                statusCode = (int)resp.StatusCode;
+                healthy = resp.StatusCode == HttpStatusCode.OK;
+                if (resp.Content.Headers.ContentType?.MediaType?.Contains("json", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    var payload = await resp.Content.ReadFromJsonAsync<HealthReadyPayload>(probeCts.Token);
+                    if (!string.IsNullOrWhiteSpace(payload?.InstanceId))
+                        probedId = payload.InstanceId;
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                healthy = false;
+            }
+
+            lock (_gate)
+            {
+                node.Healthy = healthy;
+                node.LastStatusCode = statusCode;
+                if (!string.IsNullOrWhiteSpace(probedId))
+                    node.InstanceId = probedId;
+            }
+        }
+
+        lock (_gate) _hasProbed = true;
+        _logger.LogInformation("lb_probe_completed healthy_count={HealthyCount}", snapshot.Count(n => n.Healthy));
+    }
+
+    public bool TryLeaseNode(out PoolNodeState? leased)
+    {
+        lock (_gate)
+        {
+            var candidates = _healthCheckEnabled
+                ? _nodes.Where(n => n.Healthy).ToList()
+                : _nodes.ToList();
+
+            if (candidates.Count == 0)
+            {
+                leased = null;
+                return false;
+            }
+
+            if (_algorithm == "least-requests")
+            {
+                var startIdx = (int)(_rrCounter++ % candidates.Count);
+                var best = candidates[startIdx];
+                for (var offset = 1; offset < candidates.Count; offset++)
+                {
+                    var candidate = candidates[(startIdx + offset) % candidates.Count];
+                    if (candidate.ActiveRequests < best.ActiveRequests)
+                        best = candidate;
+                }
+                leased = best;
+            }
+            else
+            {
+                var idx = (int)(_rrCounter++ % candidates.Count);
+                leased = candidates[idx];
+            }
+
+            leased.ActiveRequests++;
+            leased.TotalRouted++;
+            return true;
+        }
+    }
+
+    public void ReleaseNode(PoolNodeState node)
+    {
+        lock (_gate)
+        {
+            if (node.ActiveRequests > 0)
+                node.ActiveRequests--;
+        }
+    }
+
+    public object GetStatus()
+    {
+        lock (_gate) return GetStatusUnsafe();
+    }
+
+    private object GetStatusUnsafe() => new
+    {
+        algorithm = _algorithm,
+        healthCheckEnabled = _healthCheckEnabled,
+        hasProbed = _hasProbed,
+        nodes = _nodes.Select(n => new
+        {
+            url = n.Url,
+            instanceId = n.InstanceId,
+            healthy = n.Healthy,
+            activeRequests = n.ActiveRequests,
+            totalRouted = n.TotalRouted,
+            lastStatusCode = n.LastStatusCode
+        }).ToArray()
+    };
+}
