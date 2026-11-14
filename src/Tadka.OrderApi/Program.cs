@@ -4,6 +4,7 @@ using Tadka.OrderApi.Modules.Catalog;
 using Tadka.OrderApi.Modules.DistributedIds;
 using Tadka.OrderApi.Modules.Indexing;
 using Tadka.OrderApi.Modules.Orders;
+using Tadka.OrderApi.Modules.Replication;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,7 +20,12 @@ builder.Logging.AddSimpleConsole(o =>
 // connection string in appsettings.json, set explicitly. Nothing here relies on defaults.
 var connectionString = builder.Configuration.GetConnectionString("Tadka")
     ?? throw new InvalidOperationException("ConnectionStrings:Tadka is missing.");
+var replicaConnectionString = builder.Configuration.GetConnectionString("TadkaReplica")
+    ?? "Host=localhost;Port=5434;Database=tadka;Username=tadka;Password=tadka_local;Maximum Pool Size=10;Minimum Pool Size=0;Timeout=15";
+
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+builder.Services.AddSingleton(_ => new ReplicaDataSource(NpgsqlDataSource.Create(replicaConnectionString)));
+builder.Services.AddSingleton<ReplicaLagLabService>();
 builder.Services.AddSingleton<IOrderService, OrderStore>();
 builder.Services.AddSingleton<IOrderStatusService, OrderStatusService>();
 builder.Services.AddSingleton<ICatalogModule, CatalogModule>();
