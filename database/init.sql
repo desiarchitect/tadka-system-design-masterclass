@@ -57,3 +57,23 @@ INSERT INTO catalog.menu_items (id, restaurant_id, name, price, is_available, ve
     (102, 7, 'Masala Dosa', 120.00, TRUE, 1),
     (103, 7, 'Filter Coffee', 60.00, FALSE, 1),
     (201, 8, 'Veg Biryani', 220.00, TRUE, 1);
+
+-- Lesson 12: seed 25,000 historical orders across 20 restaurants so Seq Scan vs B+ Tree Index Scan
+-- vs Covering Index-Only Scan differences are clearly visible in EXPLAIN (ANALYZE, BUFFERS).
+INSERT INTO orders (customer_id, restaurant_id, total_amount, created_at, status, status_version)
+SELECT
+    1000 + (i % 500),
+    1 + (i % 20),
+    ROUND((120 + (i % 480))::numeric, 2),
+    NOW() - (i * INTERVAL '1 minute'),
+    CASE (((i - 1) / 20) % 4)
+        WHEN 0 THEN 'placed'
+        WHEN 1 THEN 'preparing'
+        WHEN 2 THEN 'ready'
+        ELSE 'delivered'
+    END,
+    (((i - 1) / 20) % 4)
+FROM generate_series(1, 25000) AS s(i);
+
+-- Populate pg_statistic and the PostgreSQL visibility map (all_visible) from clean startup.
+VACUUM ANALYZE orders;

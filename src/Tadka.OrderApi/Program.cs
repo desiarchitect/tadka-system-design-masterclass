@@ -1,6 +1,7 @@
 using Npgsql;
 using Tadka.OrderApi.Data;
 using Tadka.OrderApi.Modules.Catalog;
+using Tadka.OrderApi.Modules.Indexing;
 using Tadka.OrderApi.Modules.Orders;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +23,7 @@ builder.Services.AddSingleton<IOrderService, OrderStore>();
 builder.Services.AddSingleton<IOrderStatusService, OrderStatusService>();
 builder.Services.AddSingleton<ICatalogModule, CatalogModule>();
 builder.Services.AddSingleton<IOrderCheckoutService, OrderCheckoutService>();
+builder.Services.AddSingleton<IndexingLabService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
