@@ -1,24 +1,5 @@
 @baseUrl = http://localhost:5080
-
-### Same key and payload can be sent repeatedly
-POST {{baseUrl}}/orders
-Content-Type: application/json
-Idempotency-Key: demo-order-1
-
-{"customerId":1,"restaurantId":7,"totalAmount":249.50}
-
-### Conflict, not a second order
-POST {{baseUrl}}/orders
-Content-Type: application/json
-Idempotency-Key: demo-order-1
-
-{"customerId":1,"restaurantId":7,"totalAmount":250}
-
-### Replace ID with the actual create result
-GET {{baseUrl}}/orders/1
-
-### First cursor page
-GET {{baseUrl}}/orders?customerId=1&limit=2
+@gwUrl = http://localhost:5081
 
 ### Lesson 10: inspect Catalog menu for Tadka Indiranagar (restaurant 7)
 GET {{baseUrl}}/catalog/restaurants/7/menu
@@ -30,20 +11,47 @@ Idempotency-Key: checkout-demo-1
 
 {"customerId":51,"restaurantId":7,"items":[{"menuItemId":101,"quantity":2}]}
 
-### Lesson 10: change Paneer Tikka price from 240.00 to 290.00
-PATCH {{baseUrl}}/catalog/restaurants/7/items/101
+### Lesson 11: checkout through API Gateway (:5081) with correlation ID
+POST {{gwUrl}}/api/orders/checkout
 Content-Type: application/json
+X-Tadka-Client: mobile-app
+X-Correlation-Id: trace-gw-101
+Idempotency-Key: gw-demo-1
 
-{"price":290.00}
+{"customerId":51,"restaurantId":7,"items":[{"menuItemId":101,"quantity":1}]}
 
-### Lesson 10: order receipt keeps the 240.00 snapshot price
-GET {{baseUrl}}/orders/1/receipt
-
-### Lesson 10 negative control: naive cross-schema join drifts to 580.00
-GET {{baseUrl}}/orders/1/naive-join-receipt
-
-### Lesson 10: restore Paneer Tikka price to 240.00
-PATCH {{baseUrl}}/catalog/restaurants/7/items/101
+### Lesson 11: mobile client blocked from operator status update (403)
+PATCH {{gwUrl}}/api/orders/1/status
 Content-Type: application/json
+X-Tadka-Client: mobile-app
 
-{"price":240.00}
+{"status":"preparing"}
+
+### Lesson 11: partner-web allowed to mutate status (200)
+PATCH {{gwUrl}}/api/orders/1/status
+Content-Type: application/json
+X-Tadka-Client: partner-web
+
+{"status":"preparing"}
+
+### Lesson 11: internal diagnostic route blocked at gateway (403)
+GET {{gwUrl}}/api/orders/1/naive-join-receipt
+X-Tadka-Client: partner-web
+
+### Lesson 11: mobile BFF compact tracking payload
+GET {{gwUrl}}/bff/mobile/orders/1/tracking
+X-Tadka-Client: mobile-app
+
+### Lesson 11 negative control: strict mode returns 502 when Catalog fails
+GET {{gwUrl}}/bff/mobile/orders/1/tracking?mode=strict
+X-Tadka-Client: mobile-app
+X-Demo-Catalog-Failure: true
+
+### Lesson 11 resilient BFF: returns 200 with catalogDegraded=true when Catalog fails
+GET {{gwUrl}}/bff/mobile/orders/1/tracking
+X-Tadka-Client: mobile-app
+X-Demo-Catalog-Failure: true
+
+### Lesson 11: partner BFF full itemized view
+GET {{gwUrl}}/bff/partner/orders/1
+X-Tadka-Client: partner-web
