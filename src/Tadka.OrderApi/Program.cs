@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Npgsql;
 using StackExchange.Redis;
 using Tadka.OrderApi.Data;
@@ -5,11 +6,15 @@ using Tadka.OrderApi.Modules.Catalog;
 using Tadka.OrderApi.Modules.DistributedIds;
 using Tadka.OrderApi.Modules.Indexing;
 using Tadka.OrderApi.Modules.Instance;
+using Tadka.OrderApi.Modules.Observability;
 using Tadka.OrderApi.Modules.Orders;
 using Tadka.OrderApi.Modules.OverloadProtection;
 using Tadka.OrderApi.Modules.Replication;
 using Tadka.OrderApi.Modules.Resilience;
 using Tadka.OrderApi.Modules.Sharding;
+
+Activity.DefaultIdFormat = ActivityIdFormat.W3C;
+Activity.ForceDefaultIdFormat = true;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -47,6 +52,7 @@ builder.Services.AddSingleton<ShardingLabService>();
 builder.Services.AddSingleton<InstanceLifecycleService>();
 builder.Services.AddSingleton<ResilienceLabService>();
 builder.Services.AddSingleton<OverloadProtectionLabService>();
+builder.Services.AddSingleton<ObservabilityLabService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();

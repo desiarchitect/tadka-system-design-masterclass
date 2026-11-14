@@ -1,8 +1,20 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+
+Activity.DefaultIdFormat = ActivityIdFormat.W3C;
+Activity.ForceDefaultIdFormat = true;
+
+using var gatewayActivitySource = new ActivitySource("Tadka.GatewayBff", "1.0.0");
+using var gatewayActivityListener = new ActivityListener
+{
+    ShouldListenTo = source => source.Name == "Tadka.GatewayBff",
+    Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded
+};
+ActivitySource.AddActivityListener(gatewayActivityListener);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -542,6 +554,102 @@ app.MapGet("/bff/partner/orders/{id:long}", async (
         correlationId));
 });
 
+app.MapPost("/api/observability/trace-order", async (HttpContext http, IHttpClientFactory clientFactory, CancellationToken ct) =>
+{
+    var correlationId = http.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 128)
+        correlationId = Guid.NewGuid().ToString("N");
+    var incomingTraceparent = http.Request.Headers["traceparent"].FirstOrDefault();
+    var hasParent = !string.IsNullOrWhiteSpace(incomingTraceparent)
+        && ActivityContext.TryParse(incomingTraceparent, null, out var parsedParent);
+
+    TraceOrderGatewayRequest? payload = null;
+    if (http.Request.ContentLength is > 0 || http.Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) == true)
+    {
+        try
+        {
+            payload = await JsonSerializer.DeserializeAsync<TraceOrderGatewayRequest>(http.Request.Body, jsonOptions, ct);
+        }
+        catch (JsonException)
+        {
+            return Results.Problem(statusCode: 400, title: "Invalid JSON payload.");
+        }
+    }
+
+    payload ??= new TraceOrderGatewayRequest();
+
+    using var gatewayActivity = hasParent
+        ? gatewayActivitySource.StartActivity("gateway.http.post_trace_order", ActivityKind.Server, parsedParent)
+        : gatewayActivitySource.StartActivity("gateway.http.post_trace_order", ActivityKind.Server);
+
+    var traceId = gatewayActivity?.TraceId.ToHexString() ?? ActivityTraceId.CreateRandom().ToHexString();
+    var gatewaySpanId = gatewayActivity?.SpanId.ToHexString() ?? ActivitySpanId.CreateRandom().ToHexString();
+    var traceparentOut = $"00-{traceId}-{gatewaySpanId}-01";
+    var startedAtUtc = DateTime.UtcNow;
+    var sw = Stopwatch.StartNew();
+
+    var client = clientFactory.CreateClient("OrderApi");
+    using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, "/observability/orders/trace-checkout")
+    {
+        Content = JsonContent.Create(payload)
+    };
+    upstreamReq.Headers.Add("traceparent", traceparentOut);
+    upstreamReq.Headers.Add("X-Correlation-Id", correlationId);
+
+    using var upstreamRes = await client.SendAsync(upstreamReq, ct);
+    var upstreamBodyText = await upstreamRes.Content.ReadAsStringAsync(ct);
+    sw.Stop();
+    gatewayActivity?.Stop();
+
+    var gatewayStatus = upstreamRes.IsSuccessStatusCode ? "ok" : "error";
+    var ingestPayload = new
+    {
+        traceId,
+        spanId = gatewaySpanId,
+        parentSpanId = hasParent ? parsedParent.SpanId.ToHexString() : "0000000000000000",
+        service = "gateway-bff",
+        operation = "gateway.http.post_trace_order",
+        durationMs = Math.Round(sw.Elapsed.TotalMilliseconds, 3),
+        status = gatewayStatus,
+        startedAtUtc,
+        attributes = new Dictionary<string, string>
+        {
+            ["http.route"] = "/api/observability/trace-order",
+            ["http.status_code"] = ((int)upstreamRes.StatusCode).ToString()
+        }
+    };
+
+    using var ingestRes = await client.PostAsJsonAsync("/observability/spans/ingest", ingestPayload, ct);
+
+    http.Response.Headers["X-Correlation-Id"] = correlationId;
+    http.Response.Headers["X-Trace-Id"] = traceId;
+    http.Response.Headers["traceparent"] = traceparentOut;
+
+    JsonElement? upstreamJson = null;
+    if (!string.IsNullOrWhiteSpace(upstreamBodyText))
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(upstreamBodyText);
+            upstreamJson = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            upstreamJson = null;
+        }
+    }
+
+    return Results.Json(new
+    {
+        traceId,
+        traceparent = traceparentOut,
+        gatewaySpanId,
+        orderApiStatusCode = (int)upstreamRes.StatusCode,
+        durationMs = Math.Round(sw.Elapsed.TotalMilliseconds, 3),
+        upstream = upstreamJson
+    }, statusCode: (int)upstreamRes.StatusCode);
+});
+
 app.Run();
 
 static void CopyCacheHeaders(HttpResponseMessage upstream, IHeaderDictionary downstreamHeaders)
@@ -669,6 +777,7 @@ internal sealed record PartnerOrderResponse(
     string CorrelationId);
 
 internal sealed record LbConfigRequest(string? Algorithm, bool? HealthCheckEnabled, bool? ResetStats);
+internal sealed record TraceOrderGatewayRequest(long? CustomerId = null, long? RestaurantId = null, bool? SimulateFail = null, int? SlowDbMs = null);
 internal sealed record HealthReadyPayload(string? Status, string? InstanceId, string? State);
 
 internal sealed class PoolNodeState(string url, string defaultInstanceId)
