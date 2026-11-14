@@ -229,3 +229,46 @@ CREATE TABLE IF NOT EXISTS saga_executions (
     created_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     updated_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
+
+-- Lesson 36: Capstone UPI Payment Gateway, Double-Entry Ledger & Webhook Reconciliation
+CREATE TABLE IF NOT EXISTS payment_intents (
+    id                 BIGSERIAL     PRIMARY KEY,
+    intent_ref         VARCHAR(64)   NOT NULL UNIQUE,
+    order_id           BIGINT        NOT NULL REFERENCES orders(id),
+    customer_id        BIGINT        NOT NULL,
+    amount_paise       BIGINT        NOT NULL CHECK (amount_paise > 0),
+    currency           VARCHAR(8)    NOT NULL DEFAULT 'INR',
+    payer_vpa          VARCHAR(128)  NOT NULL,
+    idempotency_key    VARCHAR(128)  NOT NULL,
+    payload_hash       VARCHAR(128)  NOT NULL,
+    status             VARCHAR(32)   NOT NULL DEFAULT 'PENDING',
+    psp_rrn            VARCHAR(64)   NULL,
+    webhook_deliveries INT           NOT NULL DEFAULT 0,
+    created_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    UNIQUE (customer_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS ledger_entries (
+    id              BIGSERIAL     PRIMARY KEY,
+    transaction_ref VARCHAR(64)   NOT NULL,
+    intent_ref      VARCHAR(64)   NOT NULL REFERENCES payment_intents(intent_ref),
+    order_id        BIGINT        NOT NULL,
+    account_code    VARCHAR(64)   NOT NULL,
+    direction       VARCHAR(8)    NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')),
+    amount_paise    BIGINT        NOT NULL CHECK (amount_paise > 0),
+    signed_amount   BIGINT        NOT NULL,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_intent_ref ON ledger_entries (intent_ref);
+
+CREATE TABLE IF NOT EXISTS payment_webhook_events (
+    id              BIGSERIAL     PRIMARY KEY,
+    webhook_id      VARCHAR(128)  NOT NULL,
+    intent_ref      VARCHAR(64)   NOT NULL,
+    reported_status VARCHAR(32)   NOT NULL,
+    psp_rrn         VARCHAR(64)   NULL,
+    processing_mode VARCHAR(16)   NOT NULL,
+    outcome         VARCHAR(64)   NOT NULL,
+    received_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);

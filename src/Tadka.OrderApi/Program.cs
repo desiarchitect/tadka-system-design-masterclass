@@ -8,6 +8,7 @@ using Tadka.OrderApi.Modules.Instance;
 using Tadka.OrderApi.Modules.Messaging;
 using Tadka.OrderApi.Modules.Orders;
 using Tadka.OrderApi.Modules.OutboxSaga;
+using Tadka.OrderApi.Modules.Payments;
 using Tadka.OrderApi.Modules.Replication;
 using Tadka.OrderApi.Modules.Sharding;
 
@@ -48,6 +49,7 @@ builder.Services.AddSingleton<InstanceLifecycleService>();
 builder.Services.AddSingleton<KafkaEventsLabService>();
 builder.Services.AddSingleton<ReliableConsumerLabService>();
 builder.Services.AddSingleton<OutboxSagaLabService>();
+builder.Services.AddSingleton<UpiPaymentWorkflowService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
