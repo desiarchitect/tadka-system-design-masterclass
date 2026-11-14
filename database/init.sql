@@ -110,3 +110,57 @@ CREATE TABLE IF NOT EXISTS id_bench_snowflake (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     payload    TEXT        NOT NULL
 );
+
+-- Lesson 18: 4 logical shards inside PostgreSQL to prove hot-partition skew, write salting & scatter-gather routing.
+CREATE SCHEMA IF NOT EXISTS shard_0;
+CREATE SCHEMA IF NOT EXISTS shard_1;
+CREATE SCHEMA IF NOT EXISTS shard_2;
+CREATE SCHEMA IF NOT EXISTS shard_3;
+
+CREATE TABLE IF NOT EXISTS shard_0.sharded_orders (
+    order_id      BIGINT        PRIMARY KEY,
+    customer_id   BIGINT        NOT NULL,
+    restaurant_id BIGINT        NOT NULL,
+    shard_key     TEXT          NOT NULL,
+    total_amount  NUMERIC(10,2) NOT NULL,
+    status        TEXT          NOT NULL,
+    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS shard_0_customer_idx ON shard_0.sharded_orders (customer_id, created_at DESC, order_id DESC);
+CREATE INDEX IF NOT EXISTS shard_0_restaurant_idx ON shard_0.sharded_orders (restaurant_id, created_at DESC, order_id DESC);
+
+CREATE TABLE IF NOT EXISTS shard_1.sharded_orders (
+    order_id      BIGINT        PRIMARY KEY,
+    customer_id   BIGINT        NOT NULL,
+    restaurant_id BIGINT        NOT NULL,
+    shard_key     TEXT          NOT NULL,
+    total_amount  NUMERIC(10,2) NOT NULL,
+    status        TEXT          NOT NULL,
+    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS shard_1_customer_idx ON shard_1.sharded_orders (customer_id, created_at DESC, order_id DESC);
+CREATE INDEX IF NOT EXISTS shard_1_restaurant_idx ON shard_1.sharded_orders (restaurant_id, created_at DESC, order_id DESC);
+
+CREATE TABLE IF NOT EXISTS shard_2.sharded_orders (
+    order_id      BIGINT        PRIMARY KEY,
+    customer_id   BIGINT        NOT NULL,
+    restaurant_id BIGINT        NOT NULL,
+    shard_key     TEXT          NOT NULL,
+    total_amount  NUMERIC(10,2) NOT NULL,
+    status        TEXT          NOT NULL,
+    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS shard_2_customer_idx ON shard_2.sharded_orders (customer_id, created_at DESC, order_id DESC);
+CREATE INDEX IF NOT EXISTS shard_2_restaurant_idx ON shard_2.sharded_orders (restaurant_id, created_at DESC, order_id DESC);
+
+CREATE TABLE IF NOT EXISTS shard_3.sharded_orders (
+    order_id      BIGINT        PRIMARY KEY,
+    customer_id   BIGINT        NOT NULL,
+    restaurant_id BIGINT        NOT NULL,
+    shard_key     TEXT          NOT NULL,
+    total_amount  NUMERIC(10,2) NOT NULL,
+    status        TEXT          NOT NULL,
+    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS shard_3_customer_idx ON shard_3.sharded_orders (customer_id, created_at DESC, order_id DESC);
+CREATE INDEX IF NOT EXISTS shard_3_restaurant_idx ON shard_3.sharded_orders (restaurant_id, created_at DESC, order_id DESC);
