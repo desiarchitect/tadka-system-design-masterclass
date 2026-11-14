@@ -33,9 +33,10 @@ different lessons.
 | `lesson-37-resilience` | Layered timeouts & deadline propagation, `k^N` retry amplification vs 10% retry budget, full-jitter backoff, and circuit breaker state machine | `docs/lessons/lesson-37-contract.md` |
 | `lesson-38-overload-protection` | Atomic Redis Lua token bucket (`TIME`), fail-open/fail-closed/local-fallback policies, isolated semaphore bulkheads, and priority load shedding (Lessons 38 & 39) | `docs/lessons/lesson-38-contract.md` |
 | `lesson-40-observability` | W3C `traceparent` 4-span trace tree across `GatewayBff`, `OrderApi`, Redis & PostgreSQL, bounded-cardinality RED/USE metrics, PII masking, and storm log shedding | `docs/lessons/lesson-40-contract.md` |
+| `lesson-45-tadka-v1-production` | Unified Tadka v1.0 production capstone combining Module 5 (Kafka, Outbox, UPI double-entry ledger) and Module 6 (resilience, overload protection, W3C tracing & PII masking) with chaos drill (`16` cumulative scripts) | `docs/lessons/lesson-45-contract.md` |
 
-Lessons 02, 03, 04, 06, 09, 13, 17, 19, 20, 21, 22, 25, 28, 29, 30, 33, 41 and 42 are board or whiteboard case-study lessons and do not need separate code branches (Lesson 35 shares `lesson-34-outbox-saga`; Lesson 39 shares `lesson-38-overload-protection`).
-Later module branches (Module 7+) are not published yet.
+Lessons 02, 03, 04, 06, 09, 13, 17, 19, 20, 21, 22, 25, 28, 29, 30, 33, 41, 42, 43 and 44 are board or whiteboard case-study lessons and do not need separate code branches (Lesson 35 shares `lesson-34-outbox-saga`; Lesson 39 shares `lesson-38-overload-protection`).
+All Modules 0 through 7 code branches are now published through `lesson-45-tadka-v1-production`.
 
 ## Get a lesson
 
