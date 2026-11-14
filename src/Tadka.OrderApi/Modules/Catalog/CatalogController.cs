@@ -42,6 +42,43 @@ public sealed class CatalogController(
         return result.Menu is null ? Problem(statusCode: 404, title: "Restaurant not found.") : Ok(result.Menu);
     }
 
+    [HttpGet("menu-stampede")]
+    [ProducesResponseType<CatalogMenuResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMenuStampede(
+        long restaurantId,
+        [FromQuery] string? mode,
+        [FromQuery] int dbDelayMs = 60,
+        [FromQuery] int baseTtlSeconds = 30,
+        [FromQuery] int jitterSeconds = 6,
+        CancellationToken ct = default)
+    {
+        if (restaurantId <= 0)
+            return Problem(statusCode: 400, title: "Restaurant ID must be positive.");
+
+        var effectiveMode = string.IsNullOrWhiteSpace(mode) ? "naive" : mode.Trim().ToLowerInvariant();
+        if (effectiveMode is not ("naive" or "single-flight"))
+            return Problem(statusCode: 400, title: "Query mode must be 'naive' or 'single-flight'.");
+        if (dbDelayMs is < 0 or > 500)
+            return Problem(statusCode: 400, title: "dbDelayMs must be between 0 and 500.");
+        if (baseTtlSeconds is < 1 or > 3600)
+            return Problem(statusCode: 400, title: "baseTtlSeconds must be between 1 and 3600.");
+        if (jitterSeconds is < 0 or > 300)
+            return Problem(statusCode: 400, title: "jitterSeconds must be between 0 and 300.");
+
+        var result = await menuCache.GetMenuStampedeAsync(
+            restaurantId, effectiveMode, dbDelayMs, baseTtlSeconds, jitterSeconds, ct);
+
+        Response.Headers["X-Cache"] = result.CacheStatus;
+        Response.Headers["X-Stampede-Role"] = result.StampedeRole;
+        Response.Headers["X-Cache-Key"] = result.CacheKey;
+        if (result.TtlSeconds is { } ttl)
+            Response.Headers["X-Cache-Ttl-Seconds"] = ttl.ToString();
+
+        return result.Menu is null ? Problem(statusCode: 404, title: "Restaurant not found.") : Ok(result.Menu);
+    }
+
     [HttpPatch("items/{itemId:long}")]
     [ProducesResponseType<CatalogMenuItem>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
