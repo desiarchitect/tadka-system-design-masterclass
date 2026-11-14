@@ -58,6 +58,18 @@ INSERT INTO catalog.menu_items (id, restaurant_id, name, price, is_available, ve
     (103, 7, 'Filter Coffee', 60.00, FALSE, 1),
     (201, 8, 'Veg Biryani', 220.00, TRUE, 1);
 
+-- Lesson 14: flash deal inventory row for MVCC inspection and lost-update reproduction.
+CREATE TABLE IF NOT EXISTS catalog.flash_deals (
+    menu_item_id    BIGINT PRIMARY KEY REFERENCES catalog.menu_items(id),
+    title           TEXT   NOT NULL,
+    remaining_stock INT    NOT NULL CHECK (remaining_stock >= 0),
+    version         BIGINT NOT NULL DEFAULT 1
+);
+
+INSERT INTO catalog.flash_deals (menu_item_id, title, remaining_stock, version) VALUES
+    (101, 'Paneer Tikka Lunch Flash Deal', 5, 1)
+ON CONFLICT (menu_item_id) DO NOTHING;
+
 -- Lesson 12: seed 25,000 historical orders across 20 restaurants so Seq Scan vs B+ Tree Index Scan
 -- vs Covering Index-Only Scan differences are clearly visible in EXPLAIN (ANALYZE, BUFFERS).
 INSERT INTO orders (customer_id, restaurant_id, total_amount, created_at, status, status_version)

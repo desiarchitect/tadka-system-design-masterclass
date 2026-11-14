@@ -22,6 +22,7 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton<IOrderService, OrderStore>();
 builder.Services.AddSingleton<IOrderStatusService, OrderStatusService>();
 builder.Services.AddSingleton<ICatalogModule, CatalogModule>();
+builder.Services.AddSingleton<FlashDealService>();
 builder.Services.AddSingleton<IOrderCheckoutService, OrderCheckoutService>();
 builder.Services.AddSingleton<IndexingLabService>();
 
