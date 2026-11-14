@@ -17,32 +17,33 @@ Idempotency-Key: demo-order-1
 ### Replace ID with the actual create result
 GET {{baseUrl}}/orders/1
 
-### Missing order
-GET {{baseUrl}}/orders/9223372036854775807
-
 ### First cursor page
 GET {{baseUrl}}/orders?customerId=1&limit=2
 
-### Replace cursor with nextCursor from the actual response
-GET {{baseUrl}}/orders?customerId=1&limit=2&cursor=1:1
+### Lesson 10: inspect Catalog menu for Tadka Indiranagar (restaurant 7)
+GET {{baseUrl}}/catalog/restaurants/7/menu
 
-### Offset comparison
-GET {{baseUrl}}/orders?customerId=1&limit=2&pagination=offset&offset=2
+### Lesson 10: place item-based order using ICatalogModule price quote
+POST {{baseUrl}}/orders/checkout
+Content-Type: application/json
+Idempotency-Key: checkout-demo-1
 
-### Replace ID with the actual create result
-GET {{baseUrl}}/orders/1/status
+{"customerId":51,"restaurantId":7,"items":[{"menuItemId":101,"quantity":2}]}
 
-### Fixed local workflow: placed -> preparing -> ready -> delivered
-PATCH {{baseUrl}}/orders/1/status
+### Lesson 10: change Paneer Tikka price from 240.00 to 290.00
+PATCH {{baseUrl}}/catalog/restaurants/7/items/101
 Content-Type: application/json
 
-{"status":"preparing"}
+{"price":290.00}
 
-### Current-state snapshot, then live events
-GET {{baseUrl}}/orders/1/events
-Accept: text/event-stream
+### Lesson 10: order receipt keeps the 240.00 snapshot price
+GET {{baseUrl}}/orders/1/receipt
 
-### Replay retained events after version 1 for this order
-GET {{baseUrl}}/orders/1/events
-Accept: text/event-stream
-Last-Event-ID: 1
+### Lesson 10 negative control: naive cross-schema join drifts to 580.00
+GET {{baseUrl}}/orders/1/naive-join-receipt
+
+### Lesson 10: restore Paneer Tikka price to 240.00
+PATCH {{baseUrl}}/catalog/restaurants/7/items/101
+Content-Type: application/json
+
+{"price":240.00}

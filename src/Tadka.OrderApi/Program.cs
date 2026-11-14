@@ -1,5 +1,7 @@
 using Npgsql;
 using Tadka.OrderApi.Data;
+using Tadka.OrderApi.Modules.Catalog;
+using Tadka.OrderApi.Modules.Orders;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +20,8 @@ var connectionString = builder.Configuration.GetConnectionString("Tadka")
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton<IOrderService, OrderStore>();
 builder.Services.AddSingleton<IOrderStatusService, OrderStatusService>();
+builder.Services.AddSingleton<ICatalogModule, CatalogModule>();
+builder.Services.AddSingleton<IOrderCheckoutService, OrderCheckoutService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
@@ -29,6 +33,24 @@ var csb = new NpgsqlConnectionStringBuilder(connectionString);
 app.Logger.LogWarning(
     "contract_config max_pool_size={MaxPoolSize} pool_timeout_s={Timeout} artificial_delay=false environment={Env}",
     csb.MaxPoolSize, csb.Timeout, app.Environment.EnvironmentName);
+
+app.Use(async (context, next) =>
+{
+    var correlationId = context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 128)
+        correlationId = Guid.NewGuid().ToString("N");
+
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers["X-Correlation-Id"] = correlationId;
+        return Task.CompletedTask;
+    });
+
+    using (app.Logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
+    {
+        await next();
+    }
+});
 
 app.UseExceptionHandler();
 app.MapControllers();
