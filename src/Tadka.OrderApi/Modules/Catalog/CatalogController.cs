@@ -7,17 +7,25 @@ public sealed record UpdateMenuItemRequest(decimal? Price, bool? IsAvailable);
 [ApiController]
 [Route("catalog/restaurants/{restaurantId:long}")]
 public sealed class CatalogController(
-    ICatalogModule catalog,
+    MenuCacheService menuCache,
     ILogger<CatalogController> logger,
     IWebHostEnvironment environment) : ControllerBase
 {
     [HttpGet("menu")]
     [ProducesResponseType<CatalogMenuResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetMenu(long restaurantId, CancellationToken ct)
+    public async Task<IActionResult> GetMenu(
+        long restaurantId,
+        [FromQuery] string? strategy,
+        CancellationToken ct)
     {
         if (restaurantId <= 0)
             return Problem(statusCode: 400, title: "Restaurant ID must be positive.");
+
+        var effectiveStrategy = string.IsNullOrWhiteSpace(strategy) ? "cache-aside" : strategy.Trim().ToLowerInvariant();
+        if (effectiveStrategy is not ("cache-aside" or "bypass"))
+            return Problem(statusCode: 400, title: "Query strategy must be 'cache-aside' or 'bypass'.");
 
         if (environment.IsEnvironment("Demo") && Request.Headers["X-Demo-Catalog-Failure"] == "true")
         {
@@ -25,8 +33,13 @@ public sealed class CatalogController(
             return Problem(statusCode: 503, title: "Catalog dependency unavailable (demo fault injection).");
         }
 
-        var menu = await catalog.GetMenuAsync(restaurantId, ct);
-        return menu is null ? Problem(statusCode: 404, title: "Restaurant not found.") : Ok(menu);
+        var result = await menuCache.GetMenuAsync(restaurantId, effectiveStrategy, ct);
+        Response.Headers["X-Cache"] = result.CacheStatus;
+        Response.Headers["X-Cache-Key"] = result.CacheKey;
+        if (result.TtlSeconds is { } ttl)
+            Response.Headers["X-Cache-Ttl-Seconds"] = ttl.ToString();
+
+        return result.Menu is null ? Problem(statusCode: 404, title: "Restaurant not found.") : Ok(result.Menu);
     }
 
     [HttpPatch("items/{itemId:long}")]
@@ -37,6 +50,7 @@ public sealed class CatalogController(
         long restaurantId,
         long itemId,
         [FromBody] UpdateMenuItemRequest request,
+        [FromQuery] string? invalidation,
         CancellationToken ct)
     {
         if (restaurantId <= 0 || itemId <= 0)
@@ -46,13 +60,20 @@ public sealed class CatalogController(
         if (request.Price is { } p && (p <= 0 || p > 99999999.99m || decimal.Round(p, 2) != p))
             return Problem(statusCode: 400, title: "Price must be positive with at most two decimal places.");
 
-        var updated = await catalog.UpdateItemAsync(restaurantId, itemId, request.Price, request.IsAvailable, ct);
+        var effectiveInvalidation = string.IsNullOrWhiteSpace(invalidation) ? "delete" : invalidation.Trim().ToLowerInvariant();
+        if (effectiveInvalidation is not ("delete" or "none" or "write-through"))
+            return Problem(statusCode: 400, title: "Query invalidation must be 'delete', 'none', or 'write-through'.");
+
+        var (updated, invalidationHeader) = await menuCache.UpdateItemWithCacheAsync(
+            restaurantId, itemId, request.Price, request.IsAvailable, effectiveInvalidation, ct);
+
         if (updated is null)
             return Problem(statusCode: 404, title: "Menu item not found for this restaurant.");
 
+        Response.Headers["X-Cache-Invalidation"] = invalidationHeader;
         logger.LogInformation(
-            "catalog_item_updated restaurant_id={RestaurantId} item_id={ItemId} price={Price} available={Available} version={Version}",
-            restaurantId, itemId, updated.Price, updated.IsAvailable, updated.Version);
+            "catalog_item_updated restaurant_id={RestaurantId} item_id={ItemId} price={Price} available={Available} version={Version} invalidation={Invalidation}",
+            restaurantId, itemId, updated.Price, updated.IsAvailable, updated.Version, invalidationHeader);
         return Ok(updated);
     }
 }

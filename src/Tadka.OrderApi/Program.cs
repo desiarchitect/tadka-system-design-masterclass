@@ -1,4 +1,5 @@
 using Npgsql;
+using StackExchange.Redis;
 using Tadka.OrderApi.Data;
 using Tadka.OrderApi.Modules.Catalog;
 using Tadka.OrderApi.Modules.DistributedIds;
@@ -23,13 +24,17 @@ var connectionString = builder.Configuration.GetConnectionString("Tadka")
     ?? throw new InvalidOperationException("ConnectionStrings:Tadka is missing.");
 var replicaConnectionString = builder.Configuration.GetConnectionString("TadkaReplica")
     ?? "Host=localhost;Port=5434;Database=tadka;Username=tadka;Password=tadka_local;Maximum Pool Size=10;Minimum Pool Size=0;Timeout=15";
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis")
+    ?? "127.0.0.1:6379,abortConnect=false,connectTimeout=2000,syncTimeout=2000";
 
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton(_ => new ReplicaDataSource(NpgsqlDataSource.Create(replicaConnectionString)));
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConnectionString));
 builder.Services.AddSingleton<ReplicaLagLabService>();
 builder.Services.AddSingleton<IOrderService, OrderStore>();
 builder.Services.AddSingleton<IOrderStatusService, OrderStatusService>();
 builder.Services.AddSingleton<ICatalogModule, CatalogModule>();
+builder.Services.AddSingleton<MenuCacheService>();
 builder.Services.AddSingleton<FlashDealService>();
 builder.Services.AddSingleton<IOrderCheckoutService, OrderCheckoutService>();
 builder.Services.AddSingleton<IndexingLabService>();

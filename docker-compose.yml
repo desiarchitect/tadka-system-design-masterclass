@@ -7,51 +7,30 @@ services:
       POSTGRES_USER: tadka
       POSTGRES_PASSWORD: tadka_local   # local lab only, never a real credential
       POSTGRES_DB: tadka
-    command:
-      - "postgres"
-      - "-c"
-      - "wal_level=replica"
-      - "-c"
-      - "max_wal_senders=10"
-      - "-c"
-      - "max_replication_slots=10"
-      - "-c"
-      - "hot_standby=on"
     volumes:
       - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - ./database/02-replication-hba.sh:/docker-entrypoint-initdb.d/02-replication-hba.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tadka -d tadka"]
       interval: 2s
       timeout: 3s
       retries: 30
 
-  postgres-replica:
-    image: postgres:16
-    depends_on:
-      postgres:
-        condition: service_healthy
+  redis:
+    image: redis:7.4-alpine
     ports:
-      - "127.0.0.1:5434:5432"
-    environment:
-      PGDATA: /var/lib/postgresql/data
-      POSTGRES_USER: tadka
-      POSTGRES_PASSWORD: tadka_local   # local lab only, never a real credential
-    entrypoint:
-      - /bin/bash
-      - -c
-      - |
-        set -eu
-        if [ ! -s "$$PGDATA/PG_VERSION" ]; then
-          rm -rf "$$PGDATA"/*
-          until pg_isready -h postgres -U tadka -d tadka; do sleep 1; done
-          gosu postgres pg_basebackup -h postgres -U tadka -D "$$PGDATA" -Fp -Xs -P -R
-          chown -R postgres:postgres "$$PGDATA"
-          chmod 0700 "$$PGDATA"
-        fi
-        exec docker-entrypoint.sh postgres -c hot_standby=on
+      - "127.0.0.1:6379:6379"
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--maxmemory"
+      - "64mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tadka -d tadka && psql -U tadka -d tadka -tAc \"SELECT 1 WHERE pg_is_in_recovery()\" | grep -q 1"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       timeout: 3s
       retries: 30
