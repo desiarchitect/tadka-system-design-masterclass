@@ -195,3 +195,37 @@ CREATE TABLE IF NOT EXISTS consumer_dlq_records (
     raw_payload     TEXT          NOT NULL,
     routed_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
+
+-- Lesson 34 & 35: Transactional Outbox + Orchestrated Saga state and compensation audit
+CREATE TABLE IF NOT EXISTS outbox_events (
+    id               BIGSERIAL     PRIMARY KEY,
+    event_id         VARCHAR(128)  NOT NULL UNIQUE,
+    aggregate_type   VARCHAR(64)   NOT NULL,
+    aggregate_id     BIGINT        NOT NULL,
+    event_type       VARCHAR(64)   NOT NULL,
+    payload          JSONB         NOT NULL,
+    created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    published_at     TIMESTAMPTZ   NULL,
+    publish_attempts INT           NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_unpublished
+    ON outbox_events (created_at ASC, id ASC)
+    WHERE published_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS saga_executions (
+    saga_id               VARCHAR(128)  PRIMARY KEY,
+    order_id              BIGINT        NOT NULL,
+    menu_item_id          BIGINT        NOT NULL,
+    quantity              INT           NOT NULL,
+    scenario              VARCHAR(64)   NOT NULL,
+    current_state         VARCHAR(64)   NOT NULL,
+    inventory_reserved    BOOLEAN       NOT NULL DEFAULT FALSE,
+    inventory_compensated BOOLEAN       NOT NULL DEFAULT FALSE,
+    payment_captured      BOOLEAN       NOT NULL DEFAULT FALSE,
+    payment_refunded      BOOLEAN       NOT NULL DEFAULT FALSE,
+    kitchen_accepted      BOOLEAN       NOT NULL DEFAULT FALSE,
+    compensation_attempts INT           NOT NULL DEFAULT 0,
+    step_log              JSONB         NOT NULL DEFAULT '[]'::jsonb,
+    created_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
