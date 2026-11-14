@@ -50,6 +50,7 @@ public sealed class OrderCheckoutController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Receipt(long id, CancellationToken ct)
     {
+        Response.Headers.CacheControl = "private, no-store";
         var receipt = await checkoutService.GetReceiptAsync(id, ct);
         return receipt is null ? Problem(statusCode: 404, title: "Order not found.") : Ok(receipt);
     }

@@ -1,4 +1,8 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Tadka.OrderApi.Modules.Catalog;
 
@@ -13,6 +17,7 @@ public sealed class CatalogController(
 {
     [HttpGet("menu")]
     [ProducesResponseType<CatalogMenuResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetMenu(
@@ -37,9 +42,20 @@ public sealed class CatalogController(
         Response.Headers["X-Cache"] = result.CacheStatus;
         Response.Headers["X-Cache-Key"] = result.CacheKey;
         if (result.TtlSeconds is { } ttl)
-            Response.Headers["X-Cache-Ttl-Seconds"] = ttl.ToString();
+            Response.Headers["X-Cache-Ttl-Seconds"] = ttl.ToString(CultureInfo.InvariantCulture);
 
-        return result.Menu is null ? Problem(statusCode: 404, title: "Restaurant not found.") : Ok(result.Menu);
+        if (result.Menu is null)
+            return Problem(statusCode: 404, title: "Restaurant not found.");
+
+        var etag = ComputeMenuETag(result.Menu);
+        Response.Headers.ETag = etag;
+        Response.Headers.CacheControl = "public, max-age=15, stale-while-revalidate=30";
+        Response.Headers.Vary = "Accept-Encoding";
+
+        if (MatchesIfNoneMatch(Request.Headers.IfNoneMatch, etag))
+            return StatusCode(StatusCodes.Status304NotModified);
+
+        return Ok(result.Menu);
     }
 
     [HttpGet("menu-stampede")]
@@ -74,7 +90,7 @@ public sealed class CatalogController(
         Response.Headers["X-Stampede-Role"] = result.StampedeRole;
         Response.Headers["X-Cache-Key"] = result.CacheKey;
         if (result.TtlSeconds is { } ttl)
-            Response.Headers["X-Cache-Ttl-Seconds"] = ttl.ToString();
+            Response.Headers["X-Cache-Ttl-Seconds"] = ttl.ToString(CultureInfo.InvariantCulture);
 
         return result.Menu is null ? Problem(statusCode: 404, title: "Restaurant not found.") : Ok(result.Menu);
     }
@@ -112,5 +128,47 @@ public sealed class CatalogController(
             "catalog_item_updated restaurant_id={RestaurantId} item_id={ItemId} price={Price} available={Available} version={Version} invalidation={Invalidation}",
             restaurantId, itemId, updated.Price, updated.IsAvailable, updated.Version, invalidationHeader);
         return Ok(updated);
+    }
+
+    private static string ComputeMenuETag(CatalogMenuResponse menu)
+    {
+        var sb = new StringBuilder();
+        sb.Append(menu.RestaurantId).Append(':').Append(menu.IsOpen);
+        foreach (var item in menu.Items.OrderBy(i => i.Id))
+        {
+            sb.Append('|')
+              .Append(item.Id).Append(':')
+              .Append(item.Version).Append(':')
+              .Append(item.Price.ToString("F2", CultureInfo.InvariantCulture)).Append(':')
+              .Append(item.IsAvailable);
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
+        var shortHex = Convert.ToHexStringLower(hash).AsSpan(0, 12);
+        return $"\"menu-{menu.RestaurantId}-v{shortHex}\"";
+    }
+
+    private static bool MatchesIfNoneMatch(Microsoft.Extensions.Primitives.StringValues headerValues, string currentETag)
+    {
+        if (headerValues.Count == 0)
+            return false;
+
+        if (!EntityTagHeaderValue.TryParse(currentETag, out var currentParsed))
+            return false;
+
+        if (EntityTagHeaderValue.TryParseList(headerValues, out var candidates))
+        {
+            foreach (var candidate in candidates)
+            {
+                if (candidate.Equals(EntityTagHeaderValue.Any))
+                    return true;
+
+                // RFC 9110: GET/HEAD If-None-Match uses weak comparison (same opaque tag).
+                if (string.Equals(candidate.Tag.Value, currentParsed.Tag.Value, StringComparison.Ordinal))
+                    return true;
+            }
+        }
+
+        return false;
     }
 }

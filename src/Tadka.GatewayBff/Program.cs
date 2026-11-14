@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -15,6 +16,7 @@ builder.Logging.AddSimpleConsole(o =>
 var orderApiBaseUrl = builder.Configuration["Upstream:OrderApiBaseUrl"]
     ?? throw new InvalidOperationException("Upstream:OrderApiBaseUrl is missing.");
 var catalogTimeoutMs = builder.Configuration.GetValue<int?>("Upstream:CatalogTimeoutMs") ?? 1500;
+const int EdgeTtlSeconds = 15;
 
 builder.Services.AddProblemDetails();
 builder.Services.AddHttpClient("OrderApi", client =>
@@ -26,11 +28,14 @@ builder.Services.AddHttpClient("OrderApi", client =>
 var app = builder.Build();
 
 app.Logger.LogWarning(
-    "gateway_config upstream_order_api={Upstream} catalog_timeout_ms={TimeoutMs} environment={Env}",
-    orderApiBaseUrl, catalogTimeoutMs, app.Environment.EnvironmentName);
+    "gateway_config upstream_order_api={Upstream} catalog_timeout_ms={TimeoutMs} edge_ttl_s={EdgeTtl} environment={Env}",
+    orderApiBaseUrl, catalogTimeoutMs, EdgeTtlSeconds, app.Environment.EnvironmentName);
 
 var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var internalNaivePattern = new Regex(@"^/api/orders/\d+/naive-join-receipt$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+var edgeStore = new ConcurrentDictionary<long, EdgeCacheEntry>();
+var edgeStats = new EdgeCacheCounters();
 
 app.Use(async (context, next) =>
 {
@@ -85,6 +90,26 @@ app.Use(async (context, next) =>
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
+app.MapPost("/diagnostics/edge-cache/reset", () =>
+{
+    edgeStore.Clear();
+    edgeStats.Reset();
+    return Results.Ok(new { reset = true });
+});
+
+app.MapGet("/diagnostics/edge-cache/stats", () =>
+{
+    return Results.Ok(new
+    {
+        edgeHits = edgeStats.Hits,
+        edgeMisses = edgeStats.Misses,
+        edgeRevalidated = edgeStats.Revalidated,
+        edgeRefreshed = edgeStats.Refreshed,
+        cachedRestaurantIds = edgeStore.Keys.OrderBy(k => k).ToArray(),
+        entryCount = edgeStore.Count
+    });
+});
+
 app.MapGet("/api/catalog/restaurants/{restaurantId:long}/menu", async (
     long restaurantId,
     HttpContext context,
@@ -96,8 +121,113 @@ app.MapGet("/api/catalog/restaurants/{restaurantId:long}/menu", async (
     using var request = new HttpRequestMessage(HttpMethod.Get, $"/catalog/restaurants/{restaurantId}/menu");
     request.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
     ForwardDemoCatalogFailureHeader(context, request, app.Environment);
+    if (context.Request.Headers.TryGetValue("If-None-Match", out var ifNoneMatch))
+    {
+        foreach (var val in ifNoneMatch)
+            request.Headers.TryAddWithoutValidation("If-None-Match", val);
+    }
 
-    return await ForwardUpstreamAsync(client, request, app.Logger, correlationId, ct);
+    try
+    {
+        using var response = await client.SendAsync(request, ct);
+        CopyCacheHeaders(response, context.Response.Headers);
+
+        if (response.StatusCode == HttpStatusCode.NotModified)
+            return Results.StatusCode(StatusCodes.Status304NotModified);
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
+        return Results.Content(body, contentType, statusCode: (int)response.StatusCode);
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+    {
+        app.Logger.LogError(ex, "gw_upstream_menu_failed correlation_id={CorrelationId}", correlationId);
+        return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "Upstream Order API unavailable.");
+    }
+});
+
+app.MapGet("/api/edge/catalog/restaurants/{restaurantId:long}/menu", async (
+    long restaurantId,
+    bool? revalidate,
+    HttpContext context,
+    IHttpClientFactory httpClientFactory,
+    CancellationToken ct) =>
+{
+    var correlationId = (string)context.Items["CorrelationId"]!;
+    var forceRevalidate = revalidate ?? false;
+    var now = DateTimeOffset.UtcNow;
+
+    if (!forceRevalidate &&
+        edgeStore.TryGetValue(restaurantId, out var existing) &&
+        now < existing.ExpiresAtUtc)
+    {
+        Interlocked.Increment(ref edgeStats.HitsValue);
+        context.Response.Headers["X-Edge-Cache"] = "HIT";
+        context.Response.Headers.ETag = existing.ETag;
+        context.Response.Headers.CacheControl = existing.CacheControl;
+        return Results.Content(existing.Payload, existing.ContentType, statusCode: StatusCodes.Status200OK);
+    }
+
+    var client = httpClientFactory.CreateClient("OrderApi");
+    using var request = new HttpRequestMessage(HttpMethod.Get, $"/catalog/restaurants/{restaurantId}/menu");
+    request.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
+    ForwardDemoCatalogFailureHeader(context, request, app.Environment);
+
+    var hadEntry = edgeStore.TryGetValue(restaurantId, out var staleEntry);
+    if (hadEntry && staleEntry is not null)
+        request.Headers.TryAddWithoutValidation("If-None-Match", staleEntry.ETag);
+
+    try
+    {
+        using var response = await client.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.NotModified && staleEntry is not null)
+        {
+            Interlocked.Increment(ref edgeStats.RevalidatedValue);
+            var renewed = staleEntry with { ExpiresAtUtc = now.AddSeconds(EdgeTtlSeconds) };
+            edgeStore[restaurantId] = renewed;
+
+            CopyCacheHeaders(response, context.Response.Headers);
+            context.Response.Headers["X-Edge-Cache"] = "REVALIDATED";
+            if (!context.Response.Headers.ContainsKey("ETag"))
+                context.Response.Headers.ETag = renewed.ETag;
+            if (!context.Response.Headers.ContainsKey("Cache-Control"))
+                context.Response.Headers.CacheControl = renewed.CacheControl;
+
+            return Results.Content(renewed.Payload, renewed.ContentType, statusCode: StatusCodes.Status200OK);
+        }
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
+        CopyCacheHeaders(response, context.Response.Headers);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            context.Response.Headers["X-Edge-Cache"] = "BYPASS";
+            return Results.Content(body, contentType, statusCode: (int)response.StatusCode);
+        }
+
+        var newETag = response.Headers.ETag?.ToString() ?? string.Empty;
+        var cacheControl = response.Headers.CacheControl?.ToString() ?? $"public, max-age={EdgeTtlSeconds}";
+        edgeStore[restaurantId] = new EdgeCacheEntry(body, contentType, newETag, cacheControl, now.AddSeconds(EdgeTtlSeconds));
+
+        if (hadEntry)
+        {
+            Interlocked.Increment(ref edgeStats.RefreshedValue);
+            context.Response.Headers["X-Edge-Cache"] = "REFRESHED";
+        }
+        else
+        {
+            Interlocked.Increment(ref edgeStats.MissesValue);
+            context.Response.Headers["X-Edge-Cache"] = "MISS";
+        }
+
+        return Results.Content(body, contentType, statusCode: StatusCodes.Status200OK);
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+    {
+        app.Logger.LogError(ex, "gw_edge_upstream_failed correlation_id={CorrelationId}", correlationId);
+        return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "Upstream Order API unavailable.");
+    }
 });
 
 app.MapPost("/api/orders/checkout", async (
@@ -336,6 +466,22 @@ app.MapGet("/bff/partner/orders/{id:long}", async (
 
 app.Run();
 
+static void CopyCacheHeaders(HttpResponseMessage upstream, IHeaderDictionary downstreamHeaders)
+{
+    if (upstream.Headers.ETag is { } etag)
+        downstreamHeaders.ETag = etag.ToString();
+    if (upstream.Headers.CacheControl is { } cc)
+        downstreamHeaders.CacheControl = cc.ToString();
+    if (upstream.Headers.Vary.Count > 0)
+        downstreamHeaders.Vary = string.Join(", ", upstream.Headers.Vary);
+
+    foreach (var headerName in new[] { "X-Cache", "X-Cache-Key", "X-Cache-Ttl-Seconds" })
+    {
+        if (upstream.Headers.TryGetValues(headerName, out var values))
+            downstreamHeaders[headerName] = string.Join(",", values);
+    }
+}
+
 static void ForwardDemoCatalogFailureHeader(HttpContext context, HttpRequestMessage request, IHostEnvironment environment)
 {
     if (environment.IsEnvironment("Demo") &&
@@ -382,6 +528,34 @@ static async Task<T> FetchJsonAsync<T>(
         throw new UpstreamFailureException((int)response.StatusCode);
     return (await response.Content.ReadFromJsonAsync<T>(options, ct))
         ?? throw new UpstreamFailureException(502);
+}
+
+internal sealed record EdgeCacheEntry(
+    string Payload,
+    string ContentType,
+    string ETag,
+    string CacheControl,
+    DateTimeOffset ExpiresAtUtc);
+
+internal sealed class EdgeCacheCounters
+{
+    public long HitsValue;
+    public long MissesValue;
+    public long RevalidatedValue;
+    public long RefreshedValue;
+
+    public long Hits => Interlocked.Read(ref HitsValue);
+    public long Misses => Interlocked.Read(ref MissesValue);
+    public long Revalidated => Interlocked.Read(ref RevalidatedValue);
+    public long Refreshed => Interlocked.Read(ref RefreshedValue);
+
+    public void Reset()
+    {
+        Interlocked.Exchange(ref HitsValue, 0);
+        Interlocked.Exchange(ref MissesValue, 0);
+        Interlocked.Exchange(ref RevalidatedValue, 0);
+        Interlocked.Exchange(ref RefreshedValue, 0);
+    }
 }
 
 internal sealed class UpstreamMissingException : Exception;
