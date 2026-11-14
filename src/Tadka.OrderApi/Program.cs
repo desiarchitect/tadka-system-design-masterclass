@@ -45,6 +45,7 @@ builder.Services.AddSingleton<DistributedIdLabService>();
 builder.Services.AddSingleton<ShardingLabService>();
 builder.Services.AddSingleton<InstanceLifecycleService>();
 builder.Services.AddSingleton<KafkaEventsLabService>();
+builder.Services.AddSingleton<ReliableConsumerLabService>();
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();

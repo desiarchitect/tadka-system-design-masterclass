@@ -164,3 +164,34 @@ CREATE TABLE IF NOT EXISTS shard_3.sharded_orders (
 );
 CREATE INDEX IF NOT EXISTS shard_3_customer_idx ON shard_3.sharded_orders (customer_id, created_at DESC, order_id DESC);
 CREATE INDEX IF NOT EXISTS shard_3_restaurant_idx ON shard_3.sharded_orders (restaurant_id, created_at DESC, order_id DESC);
+
+-- Lesson 32: Reliable messaging (idempotent consumer ledger + DLQ audit table)
+CREATE TABLE IF NOT EXISTS consumer_loyalty_ledger (
+    customer_id     BIGINT        PRIMARY KEY,
+    points_balance  INT           NOT NULL DEFAULT 0,
+    credit_count    INT           NOT NULL DEFAULT 0,
+    updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS processed_consumer_events (
+    event_id        VARCHAR(128)  NOT NULL,
+    consumer_group  VARCHAR(128)  NOT NULL,
+    order_id        BIGINT        NOT NULL,
+    customer_id     BIGINT        NOT NULL,
+    points_awarded  INT           NOT NULL,
+    processed_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (event_id, consumer_group)
+);
+
+CREATE TABLE IF NOT EXISTS consumer_dlq_records (
+    id              BIGSERIAL     PRIMARY KEY,
+    event_id        VARCHAR(128)  NOT NULL UNIQUE,
+    original_topic  VARCHAR(128)  NOT NULL,
+    dlq_topic       VARCHAR(128)  NOT NULL,
+    partition_id    INT           NOT NULL,
+    offset_value    BIGINT        NOT NULL,
+    attempt_count   INT           NOT NULL,
+    failure_reason  TEXT          NOT NULL,
+    raw_payload     TEXT          NOT NULL,
+    routed_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
