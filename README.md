@@ -27,7 +27,7 @@ different lessons.
 | `lesson-26-http-edge-caching` | Strong SHA256 `ETag`, `If-None-Match` (`304`), `Cache-Control`, `private, no-store` receipts & gateway edge cache simulator | `docs/lessons/lesson-26-contract.md` |
 | `lesson-27-load-balancing` | 2-node `OrderApi` cluster (`:5080`, `:5082`), L7 round-robin & least-requests LB, `/health/ready` vs `/health/live` & draining | `docs/lessons/lesson-27-contract.md` |
 | `lesson-31-kafka-events` | Kafka 3.8 KRaft (`127.0.0.1:9092`), 4-partition `tadka.order.events`, per-key ordering, 2 vs 5 consumer group rebalance & commits | `docs/lessons/lesson-31-contract.md` |
-| `lesson-32-reliable-consumers` | Transactional `processed_consumer_events` deduplication vs `3x` credit, poison-pill backoff (`100/200/400` ms) to `tadka.order.reliable.dlq` | `docs/lessons/lesson-32-contract.md` |
+| `lesson-32-reliable-consumers` | Transactional `processed_consumer_events` deduplication vs `3x` credit, poison-pill retry (3 attempts, waits of `100` then `200` ms between them) to `tadka.order.reliable.dlq` | `docs/lessons/lesson-32-contract.md` |
 | `lesson-34-outbox-saga` | Dual-write failures (`Ghost Order`/`Phantom Event`), `outbox_events` (`idx_outbox_unpublished`, `FOR UPDATE SKIP LOCKED`), pre-mark crash recovery & idempotent Saga compensations | `docs/lessons/lesson-34-contract.md` |
 | `lesson-36-upi-payment-workflow` | Capstone UPI intent idempotency (`201`/`200`/`409`), constant-time HMAC webhooks, `FOR UPDATE` monotonic state machine, 4-leg integer-paise double-entry ledger & `/payments/upi/reconcile` | `docs/lessons/lesson-36-contract.md` |
 | `lesson-37-resilience` | Layered timeouts & deadline propagation, `k^N` retry amplification vs 10% retry budget, full-jitter backoff, and circuit breaker state machine | `docs/lessons/lesson-37-contract.md` |
@@ -37,6 +37,23 @@ different lessons.
 
 Lessons 02, 03, 04, 06, 09, 13, 17, 19, 20, 21, 22, 25, 28, 29, 30, 33, 41, 42, 43 and 44 are board or whiteboard case-study lessons and do not need separate code branches (Lesson 35 shares `lesson-34-outbox-saga`; Lesson 39 shares `lesson-38-overload-protection`).
 All Modules 0 through 7 code branches are now published through `lesson-45-tadka-v1-production`.
+
+## Check your machine first
+
+Run the setup check from the repository root on `main` (this is the command used
+in the Start Here setup video):
+
+```text
+./scripts/setup-check.ps1     # Windows PowerShell 5.1 or PowerShell 7+
+./scripts/setup-check.sh      # macOS, Linux, WSL or Git Bash
+```
+
+It only reads your machine and changes nothing. `[FAIL]` lines (Git, the .NET 10
+SDK, a running Docker engine, Docker Compose v2) block every lab. `[WARN]` lines
+matter only for the lessons they name: Node 22+ runs the `scripts/verify-*.mjs`
+checks from Lesson 07 on, k6 drives the Lesson 01 load test, and a busy port
+means another lesson's stack or program is still running. The script exits with
+code 1 when a required check fails.
 
 ## Get a lesson
 
@@ -53,14 +70,13 @@ HTTPS server and asserts connection reuse. It does not need PostgreSQL or Docker
 Request timings are observations from your machine, not promised benchmarks.
 HTTP/3 is explained in the lesson but is not implemented in the probe.
 
-For Lessons 07, 08, 10, 11, 12, 14, 15, 16, 18, 23, 24, 26, 27, 31, 32, 34, 36, 37, 38, 39 and 40, install .NET 10, Docker and Node 22+, switch to the branch,
+For Lessons 07, 08, 10, 11, 12, 14, 15, 16, 18, 23, 24, 26, 27, 31, 32, 34, 36, 37, 38, 39, 40 and 45, install .NET 10, Docker and Node 22+, switch to the branch,
 then follow its contract. Run one lesson API/database at a time because they share
-ports 5080 and 5433 (Lessons 11, 26, 27, 37, 38 and 40 also use port 5081 for `Tadka.GatewayBff`; Lessons 16 and 18 run `postgres-replica` on port 5434; Lessons 23, 24, 26, 27, 31, 32, 34, 36, 37, 38 and 40 run Redis on port 6379; Lessons 27, 37, 38 and 40 also run a second `OrderApi` node on port 5082; Lessons 31, 32, 34 and 36 run `apache/kafka:3.8.0` KRaft on port 9092). Stop only that lesson's Compose project before switching.
+ports 5080 and 5433 (Lessons 11, 26, 27, 37, 38, 40 and 45 also use port 5081 for `Tadka.GatewayBff`; Lessons 16 and 18 run `postgres-replica` on port 5434; Lessons 23, 24, 26, 27, 31, 32, 34, 36, 37, 38, 40 and 45 run Redis on port 6379; Lessons 27, 37, 38, 40 and 45 also run a second `OrderApi` node on port 5082; Lessons 31, 32, 34, 36 and 45 run `apache/kafka:3.8.0` KRaft on port 9092). Stop only that lesson's Compose project before switching.
 The databases and caches are disposable. API-only restart preserves PostgreSQL data; database teardown
 resets it.
 
-The setup-check command for the Start Here video is still planned. `main` is an
-index, not a runnable application. Do not record that setup check as available.
+`main` is an index plus the setup check, not a runnable application.
 
 ## Evolution and limits
 
