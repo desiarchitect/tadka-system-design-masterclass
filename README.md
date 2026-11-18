@@ -49,7 +49,8 @@ This is a theoretical limit for the pool under those assumptions. It is not the 
 
 - Docker
 - .NET 10 SDK
-- k6
+- Node 22+ (for the `scripts/verify-*.mjs` checks)
+- k6 (only for the historical Lesson 01 runs below)
 
 ## Run the experiment
 
@@ -149,4 +150,4 @@ Two things to keep in mind. First, the assistant can be wrong about how your dat
 
 ## Not on this branch, on purpose
 
-Redis, Kafka, microservices, Kubernetes, an API gateway, dashboards, authentication, a frontend and idempotency. Each one arrives in the lesson that needs it.
+Redis, Kafka, microservices, Kubernetes, an API gateway, dashboards, production authentication and a frontend. Each one that the course needs arrives in its own lesson.
