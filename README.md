@@ -4,7 +4,15 @@ The practical case study for the Desi Architect System Design Masterclass. Each 
 
 **Inspect → Break → Diagnose → Evolve**
 
-## Branch: `lesson-08-realtime-sse`
+## Branch: `lesson-36-upi-payment-workflow`
+
+Lesson 36. Start with [the Lesson 36 contract](docs/lessons/lesson-36-contract.md).
+Adds the UPI payment capstone: intent idempotency, HMAC-signed webhooks, a `FOR UPDATE` state machine, a double-entry ledger in integer paise and reconciliation.
+Builds on `lesson-34-outbox-saga`. Run `node scripts/verify-upi-payment-workflow.mjs` for this lesson's checks.
+
+Earlier labs that are still on this branch, each with its own contract and verifier: lessons [10](docs/lessons/lesson-10-contract.md), [11](docs/lessons/lesson-11-contract.md), [12](docs/lessons/lesson-12-contract.md), [14](docs/lessons/lesson-14-contract.md), [15](docs/lessons/lesson-15-contract.md), [16](docs/lessons/lesson-16-contract.md), [18](docs/lessons/lesson-18-contract.md), [23](docs/lessons/lesson-23-contract.md), [24](docs/lessons/lesson-24-contract.md), [26](docs/lessons/lesson-26-contract.md), [27](docs/lessons/lesson-27-contract.md), [31](docs/lessons/lesson-31-contract.md), [32](docs/lessons/lesson-32-contract.md), [34](docs/lessons/lesson-34-contract.md). Run one lesson's stack at a time, because they share ports.
+
+## Inherited branch: `lesson-08-realtime-sse`
 
 Start with [the Lesson 08 contract](docs/lessons/lesson-08-contract.md).
 This evolves Lesson 07 with persisted status versions and SSE replay.
@@ -56,7 +64,8 @@ This is a theoretical limit for the pool under those assumptions. It is not the 
 
 - Docker
 - .NET 10 SDK
-- k6
+- Node 22+ (for the `scripts/verify-*.mjs` checks)
+- k6 (only for the historical Lesson 01 runs below)
 
 ## Run the experiment
 
@@ -156,4 +165,4 @@ Two things to keep in mind. First, the assistant can be wrong about how your dat
 
 ## Not on this branch, on purpose
 
-Redis, Kafka, microservices, Kubernetes, an API gateway, dashboards, authentication, a frontend and idempotency. Each one arrives in the lesson that needs it.
+Microservices, Kubernetes, dashboards, production authentication, WebSockets and a frontend. The core labs do not need them.

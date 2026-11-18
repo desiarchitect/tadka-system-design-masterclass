@@ -62,7 +62,7 @@ try {
   assert.equal(dlqRun.validProcessedCount, 3);
   assert.equal(dlqRun.headOfLineBlockedCount, 0);
   assert.equal(dlqRun.attemptCountOnPoison, 3);
-  assert.deepEqual(dlqRun.backoffScheduleMs, [100, 200, 400]);
+  assert.deepEqual(dlqRun.backoffScheduleMs, [100, 200]);
   assert.equal(dlqRun.dlqRoutedCount, 1);
   assert.equal(dlqRun.dlqTopic, 'tadka.order.reliable.dlq');
   assert.equal(dlqRun.dlqMessageVerifiedOnKafka, true);

@@ -361,7 +361,8 @@ public sealed class ReliableConsumerLabService(
         var kafkaGroupId = $"tadka-poison-{normalized}-{Guid.NewGuid():N}"[..28];
         var processedCustomerIds = new List<long>();
         var unprocessedValidEvents = new List<string>();
-        var backoffSchedule = Enumerable.Range(0, maxAttempts).Select(i => 100 * (1 << i)).ToArray();
+        // One wait between consecutive attempts, so N attempts have N - 1 waits.
+        var backoffSchedule = Enumerable.Range(0, maxAttempts - 1).Select(i => 100 * (1 << i)).ToArray();
         string? blockedBehindEventId = null;
         var attemptCountOnPoison = 0;
         DlqRecordSummary? dlqRecord = null;
@@ -456,7 +457,10 @@ public sealed class ReliableConsumerLabService(
                 for (var attempt = 0; attempt < maxAttempts; attempt++)
                 {
                     attemptCountOnPoison++;
-                    await Task.Delay(backoffSchedule[attempt], ct);
+                    if (attempt < backoffSchedule.Length)
+                    {
+                        await Task.Delay(backoffSchedule[attempt], ct);
+                    }
                 }
 
                 if (normalized == "block-on-poison")
