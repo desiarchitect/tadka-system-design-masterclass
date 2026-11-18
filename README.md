@@ -4,7 +4,13 @@ The practical case study for the Desi Architect System Design Masterclass. Each 
 
 **Inspect → Break → Diagnose → Evolve**
 
-## Branch: `lesson-08-realtime-sse`
+## Branch: `lesson-10-modular-boundaries`
+
+Lesson 10. Start with [the Lesson 10 contract](docs/lessons/lesson-10-contract.md).
+Splits `Catalog` and `Orders` into explicit module contracts with their own schemas, and stores receipt snapshots instead of live cross-module joins.
+Builds on `lesson-08-realtime-sse`. Run `node scripts/verify-modular-boundaries.mjs` for this lesson's checks.
+
+## Inherited branch: `lesson-08-realtime-sse`
 
 Start with [the Lesson 08 contract](docs/lessons/lesson-08-contract.md).
 This evolves Lesson 07 with persisted status versions and SSE replay.
@@ -56,7 +62,8 @@ This is a theoretical limit for the pool under those assumptions. It is not the 
 
 - Docker
 - .NET 10 SDK
-- k6
+- Node 22+ (for the `scripts/verify-*.mjs` checks)
+- k6 (only for the historical Lesson 01 runs below)
 
 ## Run the experiment
 
@@ -156,4 +163,4 @@ Two things to keep in mind. First, the assistant can be wrong about how your dat
 
 ## Not on this branch, on purpose
 
-Redis, Kafka, microservices, Kubernetes, an API gateway, dashboards, authentication, a frontend and idempotency. Each one arrives in the lesson that needs it.
+Microservices, Kubernetes, dashboards, production authentication, WebSockets and a frontend. The core labs do not need them. Not here yet: an API gateway (Lesson 11), Redis (Lesson 23), Kafka (Lesson 31).
