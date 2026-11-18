@@ -4,7 +4,15 @@ The practical case study for the Desi Architect System Design Masterclass. Each 
 
 **Inspect → Break → Diagnose → Evolve**
 
-## Branch: `lesson-08-realtime-sse`
+## Branch: `lesson-23-caching-strategies`
+
+Lesson 23. Start with [the Lesson 23 contract](docs/lessons/lesson-23-contract.md).
+Adds Redis 7.4 (`allkeys-lru`, `64mb`) for cache-aside menu reads, the stale-read negative control, delete invalidation and write-through.
+Builds on `lesson-18-sharding`. Run `node scripts/verify-caching-strategies.mjs` for this lesson's checks.
+
+Earlier labs that are still on this branch, each with its own contract and verifier: lessons [10](docs/lessons/lesson-10-contract.md), [11](docs/lessons/lesson-11-contract.md), [12](docs/lessons/lesson-12-contract.md), [14](docs/lessons/lesson-14-contract.md), [15](docs/lessons/lesson-15-contract.md), [16](docs/lessons/lesson-16-contract.md), [18](docs/lessons/lesson-18-contract.md). Run one lesson's stack at a time, because they share ports.
+
+## Inherited branch: `lesson-08-realtime-sse`
 
 Start with [the Lesson 08 contract](docs/lessons/lesson-08-contract.md).
 This evolves Lesson 07 with persisted status versions and SSE replay.
@@ -56,7 +64,8 @@ This is a theoretical limit for the pool under those assumptions. It is not the 
 
 - Docker
 - .NET 10 SDK
-- k6
+- Node 22+ (for the `scripts/verify-*.mjs` checks)
+- k6 (only for the historical Lesson 01 runs below)
 
 ## Run the experiment
 
@@ -156,4 +165,4 @@ Two things to keep in mind. First, the assistant can be wrong about how your dat
 
 ## Not on this branch, on purpose
 
-Redis, Kafka, microservices, Kubernetes, an API gateway, dashboards, authentication, a frontend and idempotency. Each one arrives in the lesson that needs it.
+Microservices, Kubernetes, dashboards, production authentication, WebSockets and a frontend. The core labs do not need them. Not here yet: Kafka (Lesson 31).
